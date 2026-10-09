@@ -1,0 +1,22 @@
+{
+  "topic": "Why an upload response is not proof that a social post is live",
+  "audience": "Solo creators building a reliable content publishing workflow",
+  "angle": "Explain the difference between accepted upload, queued publication, provider-reported publication, and checked public visibility. No claims about completed testing.",
+  "sources": [
+    {
+      "title": "Postiz public API create posts",
+      "url": "https://docs.postiz.com/public-api/posts/create",
+      "excerpt": "The create request can schedule a post. Its response contains postId and integration fields. This response confirms creation of a publishing task, not actual public visibility."
+    },
+    {
+      "title": "Postiz public API list posts",
+      "url": "https://docs.postiz.com/public-api/posts/list",
+      "excerpt": "The list endpoint exposes posts with state, publishDate, and releaseURL. A pipeline must query the outcome and inspect the resulting platform link rather than treating the create response as publication."
+    }
+  ],
+  "platforms": [
+    "x",
+    "xiaohongshu",
+    "youtube"
+  ]
+}

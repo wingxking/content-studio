@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "brief": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 1000
+        },
+        "audience": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 1000
+        },
+        "angle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 4000
+        },
+        "sources": {
+          "minItems": 1,
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "excerpt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 12000
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "excerpt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "platforms": {
+          "minItems": 1,
+          "maxItems": 12,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "xiaohongshu",
+              "reddit",
+              "x",
+              "wechat",
+              "tiktok",
+              "bilibili",
+              "youtube",
+              "kuaishou",
+              "douyin",
+              "instagram",
+              "linkedin",
+              "facebook"
+            ]
+          }
+        }
+      },
+      "required": [
+        "topic",
+        "audience",
+        "angle",
+        "sources",
+        "platforms"
+      ],
+      "additionalProperties": false
+    },
+    "content": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80000
+        },
+        "variants": {
+          "minItems": 1,
+          "maxItems": 12,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "xiaohongshu",
+                  "reddit",
+                  "x",
+                  "wechat",
+                  "tiktok",
+                  "bilibili",
+                  "youtube",
+                  "kuaishou",
+                  "douyin",
+                  "instagram",
+                  "linkedin",
+                  "facebook"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60000
+              },
+              "tags": {
+                "maxItems": 30,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 80
+                }
+              },
+              "mediaPaths": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "platform",
+              "title",
+              "text",
+              "tags",
+              "mediaPaths"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "title",
+        "body",
+        "variants"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "brief",
+    "content"
+  ],
+  "additionalProperties": false
+}
