@@ -71,6 +71,8 @@ For Postiz, export `POSTIZ_API_KEY` and optionally `POSTIZ_BASE_URL`. Account cr
 npm run typecheck
 npm test
 npm run build
+# With the local server running:
+npm run test:http
 ```
 
 See [research](docs/research.md), [accounts and access](docs/accounts.md), [architecture](docs/architecture.md), and [acceptance](docs/acceptance.md). Account registration, app review, public publishing, and stage-two independence must each be verified separately.

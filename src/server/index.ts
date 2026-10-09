@@ -63,7 +63,7 @@ app.get('/api/jobs/:id/export', async (req, res) => { const bundle = await expor
 app.get('/api/media', async (req, res) => {
   const path = await realpath(resolve(z.string().parse(req.query.path))); const root = await realpath(mediaRoot); if (!path.startsWith(`${root}${sep}`)) { res.status(403).end(); return; }
   const info = await stat(path); if (!info.isFile() || info.size > 500 * 1024 * 1024) throw new Error('Media file is unavailable.');
-  res.setHeader('Content-Disposition', `inline; filename="${basename(path).replace(/[^\w.-]/g, '_')}"`); res.sendFile(path);
+  res.setHeader('Content-Disposition', `inline; filename="${basename(path).replace(/[^\w.-]/g, '_')}"`); res.sendFile(path, { dotfiles: 'allow' });
 });
 app.get('/api/docs/:name', async (req, res) => {
   const name = z.enum(['research', 'accounts', 'architecture', 'acceptance']).parse(req.params.name);
