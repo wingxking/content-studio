@@ -4,8 +4,12 @@ import { open, realpath, stat } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { z } from 'zod';
-import { accountSchema, briefSchema, generatedSchema, metricsInputSchema, nativeUrls, type Account, type Brief, type Draft, type Generated, type Job, type Platform, type StudioState, type Variant } from './model.ts';
-import { dataDirectory, mutateState, readState } from './store.ts';
+import { accountSchema, briefSchema, draftSchema, generatedSchema, metricsInputSchema, nativeUrls, type Account, type Brief, type Draft, type Generated, type Job, type Platform, type StudioState, type Variant } from './model.ts';
+import { dataDirectory, mutateState, readState, storageMode } from './store.ts';
+import { dbRpc } from './database.ts';
+import { resolveMediaLocation } from './media-location.ts';
+import { writeDraftArtifacts } from './artifacts.ts';
+import { hasYouTubeUploadJournal } from './publication-journal.ts';
 import { assertAutomatedPublishingAllowed } from './publishing-policy.ts';
 import { canonicalPostizContent, listRemotePosts, RejectedPublishError, submitPostiz, validatePostizVariant, verifyIntegration, type Integration } from './postiz.ts';
 
@@ -52,7 +56,7 @@ function inside(path: string, root: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 async function mediaInfo(path: string): Promise<{ hash: string; video: boolean }> {
-  const absolute = await realpath(resolve(path)).catch(() => { throw new Error(`Media file does not exist: ${path}`); });
+  const absolute = await realpath(await resolveMediaLocation(path)).catch(() => { throw new Error(`Media file does not exist: ${path}`); });
   const roots = await Promise.all([realpath(process.cwd()), realpath(dataDirectory()).catch(() => resolve(dataDirectory()))]);
   if (!roots.some(root => inside(absolute, root))) throw new Error('Media must be an original local file inside the project or STUDIO_DATA_DIR.');
   const info = await stat(absolute);
@@ -91,23 +95,38 @@ async function verifyApproval(draft: Draft, variant: Variant, account: Account, 
   if (job && job.approvedHash !== targetHash(draft, variant, account)) throw new Error('Approved content revision or account target changed. Cancel this job and schedule the reviewed revision.');
 }
 
-export async function createDraft(briefInput: Brief, generatedInput: Generated): Promise<Draft> {
+export async function createDraft(briefInput: Brief, generatedInput: Generated, stableId?: string, generationModel?: string, generationContext?: { instruction: string; assetIds: string[] }): Promise<Draft> {
   const brief = briefSchema.parse(briefInput);
   const generated = validGenerated(brief, generatedInput);
-  const draft: Draft = { ...generated, id: randomUUID(), brief, createdAt: now(), revision: 1, approvedHash: null };
-  return mutateState(state => { state.drafts.push(draft); return draft; });
+  const draft: Draft = { ...generated, id: stableId ? z.uuid().parse(stableId) : randomUUID(), brief, createdAt: now(), revision: 1, approvedHash: null, ...(generationModel !== undefined ? { generationModel: draftSchema.shape.generationModel.parse(generationModel) } : {}), ...(generationContext ? { generationInstruction: draftSchema.shape.generationInstruction.parse(generationContext.instruction), generationAssetIds: draftSchema.shape.generationAssetIds.parse(generationContext.assetIds) } : {}) };
+  const result = await mutateState(state => { const existing = state.drafts.find(item => item.id === draft.id); if (existing) return existing; state.drafts.push(draft); return draft; });
+  await writeDraftArtifacts(result);
+  return result;
 }
-export async function replaceDraft(id: string, generatedInput: Generated, expectedRevision?: number): Promise<Draft> {
-  return mutateState(state => {
+export async function replaceDraft(id: string, generatedInput: Generated, expectedRevision?: number, operationId?: string, appliedProposalId?: string): Promise<Draft> {
+  const previous = (await readState()).drafts.find(item => item.id === id);
+  if (previous) await writeDraftArtifacts(previous);
+  if (appliedProposalId && storageMode() === 'supabase') {
+    if (!previous || expectedRevision === undefined) throw new Error('A reviewed proposal requires its draft and base revision.');
+    const result = draftSchema.parse(await dbRpc('studio_apply_proposal', { p_workspace: z.uuid().parse(process.env.STUDIO_WORKSPACE_ID), p_operation: z.uuid().parse(appliedProposalId), p_draft: id, p_expected_revision: expectedRevision, p_content: validGenerated(previous.brief, generatedInput) }));
+    await writeDraftArtifacts(result);
+    return result;
+  }
+  const result = await mutateState(state => {
     const draft = findDraft(state, id);
+    if (operationId && draft.lastOperationId === operationId) return draft;
+    if (appliedProposalId && draft.lastAppliedProposalId === appliedProposalId) return draft;
     if (expectedRevision !== undefined && draft.revision !== expectedRevision) throw new Error('Draft revision changed while this operation was running. Refresh the draft and retry.');
     if (state.jobs.some(job => job.draftId === id && job.status === 'submitting')) throw new Error('This draft has an active provider submission. Reconcile its outcome before editing.');
-    Object.assign(draft, validGenerated(draft.brief, generatedInput), { revision: draft.revision + 1, approvedHash: null });
+    const masterChanged = draft.title !== generatedInput.title || draft.body !== generatedInput.body;
+    Object.assign(draft, validGenerated(draft.brief, generatedInput), { adaptationStatus: operationId ? 'current' : masterChanged ? 'pending' : draft.adaptationStatus, revision: draft.revision + 1, approvedHash: null, lastOperationId: operationId, ...(appliedProposalId ? { lastAppliedProposalId: appliedProposalId } : {}) });
     return draft;
   });
+  await writeDraftArtifacts(result);
+  return result;
 }
-export async function approveDraft(id: string): Promise<Draft> {
-  return mutateState(async state => { const draft = findDraft(state, id); draft.approvedHash = await draftHash(draft); return draft; });
+export async function approveDraft(id: string, expectedRevision?: number): Promise<Draft> {
+  return mutateState(async state => { const draft = findDraft(state, id); if (expectedRevision !== undefined && expectedRevision !== draft.revision) throw new Error('Draft revision changed before approval.'); draft.approvedHash = await draftHash(draft); return draft; });
 }
 export async function addAccount(input: Omit<Account, 'id'>): Promise<Account> {
   const account = accountSchema.parse({ ...input, id: randomUUID() });
@@ -273,27 +292,29 @@ export function validateReceipt(platform: Platform, remoteUrl: string, remoteId:
 export async function confirmPublication(jobId: string, remoteUrl: string, remoteId: string): Promise<Job> {
   return mutateState(state => {
     const job = findJob(state, jobId);
-    if (!['awaiting_operator', 'needs_reconciliation', 'queued'].includes(job.status)) throw new Error('Only a submitted or native handoff job can receive a publication receipt.');
+    if (!['awaiting_operator', 'needs_reconciliation', 'queued', 'failed', 'delivered'].includes(job.status)) throw new Error('Only a submitted or native handoff job can receive a publication receipt.');
     job.remoteUrl = validateReceipt(job.platform, remoteUrl, remoteId); job.remoteId = remoteId.trim();
     transition(job, 'published', 'Operator supplied the platform post identifier and URL.'); return job;
   });
 }
 export async function cancelJob(id: string): Promise<Job> {
-  return mutateState(state => {
+  return mutateState(async state => {
     const job = findJob(state, id);
     if (!['scheduled', 'awaiting_operator', 'failed'].includes(job.status)) throw new Error('This job may already exist at the provider. Reconcile or cancel it at the provider before any new submission.');
+    if (job.providerPostId || job.remoteId || job.remoteUrl) throw new Error('This task has a remote identity. Reconcile or cancel it at the provider; local cancellation cannot withdraw it.');
+    if (await hasYouTubeUploadJournal(job)) throw new Error('A durable YouTube upload journal exists. Reconcile that upload before cancelling or creating another publication.');
     transition(job, 'cancelled', 'Local job cancelled before confirmed publication.'); return job;
   });
 }
 export async function reconcileJob(id: string): Promise<Job> {
   const state = await readState(); const job = findJob(state, id); const draft = job.snapshot?.draft ?? findDraft(state, job.draftId); const account = job.snapshot?.account ?? findAccount(state, job.accountId); const variant = job.snapshot?.variant ?? variantFor(draft, job.platform);
-  if (job.provider !== 'postiz' || !['queued', 'needs_reconciliation'].includes(job.status)) throw new Error('This job needs a native publication receipt or is not ready for Postiz reconciliation.');
+  if (job.provider !== 'postiz' || !(['queued', 'needs_reconciliation'].includes(job.status) || (job.status === 'failed' && job.providerPostId))) throw new Error('This job needs a native publication receipt or is not ready for Postiz reconciliation.');
   if (!job.providerPostId && job.approvedHash !== targetHash(draft, variant, account)) throw new Error('Content or target changed after the unknown submission. Inspect the provider and record its exact publication receipt.');
   const posts = await listRemotePosts(job);
   const matches = posts.filter(post => post.integration.id === account.integrationId && (job.providerPostId ? post.id === job.providerPostId : post.content === canonicalPostizContent(variant) && Math.abs(Date.parse(post.publishDate) - Date.parse(job.submissionStartedAt ?? job.scheduledAt)) <= 60000));
   return mutateState(current => {
     const currentJob = findJob(current, id);
-    if (!['queued', 'needs_reconciliation'].includes(currentJob.status)) return currentJob;
+    if (!['queued', 'needs_reconciliation', 'failed'].includes(currentJob.status)) return currentJob;
     if (matches.length !== 1 || !matches[0]) { transition(currentJob, 'needs_reconciliation', matches.length ? 'Multiple remote matches; inspect Postiz and record the correct receipt.' : 'No remote match found. Absence from this query does not prove non-publication; inspect the provider before resubmitting.'); return currentJob; }
     const post = matches[0]; currentJob.providerPostId = post.id;
     if (post.releaseURL && post.state === 'PUBLISHED') {
@@ -312,5 +333,51 @@ export async function exportJob(id: string): Promise<{ job: Job; account: Accoun
 }
 export async function recordMetrics(jobId: string, input: z.infer<typeof metricsInputSchema>): Promise<Job> {
   const metrics = metricsInputSchema.parse(input);
-  return mutateState(state => { const job = findJob(state, jobId); if (job.status !== 'published') throw new Error('Record performance only after a confirmed publication.'); job.metrics.push({ ...metrics, at: now() }); return job; });
+  return mutateState(state => { const job = findJob(state, jobId); if (!['published', 'delivered'].includes(job.status)) throw new Error('Record performance only after a confirmed publication or processed upload.'); job.metrics.push({ ...metrics, at: now() }); return job; });
+}
+
+export async function preparePublication(input: { draftId: string; accountId: string; expectedRevision: number; automatic: boolean }): Promise<Job> {
+  return mutateState(async state => {
+    const draft = findDraft(state, input.draftId); const account = findAccount(state, input.accountId); const variant = variantFor(draft, account.platform);
+    if (draft.revision !== input.expectedRevision) throw new Error('The draft changed. Review the current revision before publishing.');
+    await verifyDraftApproval(draft);
+    const key = await contentKey(variant, account);
+    let previous = state.jobs.find(job => job.accountId === account.id && job.contentHash === key && job.status !== 'cancelled');
+    if (!previous) {
+      for (const candidate of state.jobs.filter(job => job.accountId === account.id && job.contentHash === key && job.status === 'cancelled')) {
+        if (!await hasYouTubeUploadJournal(candidate)) continue;
+        transition(candidate, 'needs_reconciliation', 'A durable upload journal survives this legacy cancellation. Verify the existing upload before creating another publication.');
+        previous = candidate; break;
+      }
+    }
+    if (previous) {
+      const safeUnsent = ['scheduled', 'failed'].includes(previous.status) && !previous.providerPostId && !previous.remoteId && !previous.remoteUrl;
+      const journalExists = await hasYouTubeUploadJournal(previous);
+      if (previous.approvedHash === targetHash(draft, variant, account) || !safeUnsent || journalExists) return previous;
+      transition(previous, 'cancelled', 'Superseded by a newly reviewed revision before confirmed remote acceptance. The old immutable snapshot remains in history.');
+    }
+    let status: Job['status'] = input.automatic ? 'scheduled' : 'awaiting_operator';
+    let message = input.automatic ? 'Approved for automatic publication to this selected account.' : 'Ready for native publication. Follow the handoff and record the real receipt.';
+    if (input.automatic) {
+      try {
+        if (account.status !== 'connected') throw new Error('Connect this target account before automatic publication.');
+        assertAutomatedPublishingAllowed(draft, account); await validateMedia(variant);
+        if (account.provider === 'postiz') validatePostizVariant(account, variant);
+      } catch (error) { status = 'failed'; message = error instanceof Error ? error.message : 'Publishing preflight failed.'; }
+    }
+    const job: Job = { id: randomUUID(), draftId: draft.id, platform: account.platform, accountId: account.id, approvedHash: targetHash(draft, variant, account), contentHash: key, snapshot: structuredClone({ draft, account, variant }), status, scheduledAt: now(), createdAt: now(), provider: account.provider, providerPostId: null, remoteId: null, remoteUrl: null, attempts: 0, submissionOwner: null, submissionStartedAt: null, metrics: [], error: status === 'failed' ? message : null, history: [{ at: now(), status, message }] };
+    state.jobs.push(job); return job;
+  });
+}
+export async function retryFailedPublication(id: string): Promise<Job> {
+  return mutateState(async state => {
+    const job = findJob(state, id);
+    if (job.status !== 'failed') return job;
+    if (job.providerPostId || job.remoteId || job.remoteUrl) throw new Error('This submission has a remote identity. Reconcile it before retrying.');
+    if (await hasYouTubeUploadJournal(job)) throw new Error('A durable YouTube upload journal exists. Reconcile the saved upload; do not retry it as a new submission.');
+    const draft = findDraft(state, job.draftId); const account = findAccount(state, job.accountId); const variant = variantFor(draft, job.platform);
+    await verifyApproval(draft, variant, account, job); await validateMedia(variant);
+    if (account.status !== 'connected') throw new Error('Connect the selected account before retrying.');
+    transition(job, 'scheduled', 'Retrying the same unfinished publication; no new job was created.'); job.scheduledAt = now(); return job;
+  });
 }

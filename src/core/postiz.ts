@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertXText } from './text-limits.ts';
 import type { Account, Job, Variant } from './model.ts';
 
 const integrationSchema = z.object({ id: z.string().min(1), name: z.string(), identifier: z.string(), disabled: z.boolean().optional() });
@@ -42,7 +43,7 @@ export function validatePostizVariant(account: Account, variant: Variant): void 
   if (variant.mediaPaths.length) throw new Error('Postiz media upload is not configured. Use native handoff with the original files.');
   if (!account.integrationId) throw new Error('A verified Postiz integration ID is required.');
   const content = canonicalPostizContent(variant);
-  if (account.platform === 'x' && Array.from(content).length > 280) throw new Error('X text and tags exceed the initial adapter limit of 280 characters. Shorten this variant before approval.');
+  if (account.platform === 'x') assertXText(content);
   if (account.platform === 'linkedin' && content.length > 3000) throw new Error('LinkedIn text and tags exceed 3000 characters.');
 }
 export async function submitPostiz(job: Job, account: Account, variant: Variant, integration: Integration): Promise<string> {

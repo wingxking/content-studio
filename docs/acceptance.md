@@ -1,8 +1,8 @@
-# Stage-one acceptance and remaining work
+# Local product acceptance and channel delivery evidence
 
-Date: 2026-10-10, Asia/Singapore. Stage one is not complete until live publishing works for the agreed initial platform set. Stage two is gated and has not started.
+Date: 2026-10-10, Asia/Singapore. The latest scope accepts a complete local application with automatic publishing where authorized and actionable native publishing handoff elsewhere. Local application acceptance and live acceptance of each channel are separate. Cloud work remains feasibility and architecture only. Current implementation and executable acceptance are recorded in [local system delivery](local-system-delivery.zh-CN.md).
 
-## Required local acceptance
+## Historical local acceptance
 
 - [x] Real Codex generation from a supplied source brief; exactly one valid variant per requested platform.
 - [x] Review/edit/approve cycle; content or media changes invalidate approval.
@@ -50,16 +50,16 @@ This scoped delivery does not complete stage one across the requested channels. 
 
 See [replacement run](ai-agent-education-run-2026-10-10.zh-CN.md). Historical checks above describe what was observed at publication time; they do not imply the old video remains public. No broader OAuth scope or permanent deletion was performed.
 
-## Remaining product work
+## Remaining channel and production work
 
 - [ ] Complete account setup and authorized publication tests for Xiaohongshu, Reddit, X, WeChat, TikTok, Bilibili, YouTube, Kuaishou and other selected channels.
 - [x] Exercise official YouTube API submission/reconciliation for two distinct approved videos and reversible withdrawal of the old one; Postiz remains unconfigured.
-- [ ] Validate a dedicated local Supabase CLI stack, relational migrations, private Storage and durable local jobs. Hosted Supabase deployment remains stage two.
+- [x] Validate a dedicated local Supabase CLI stack, incremental relational migrations, private Storage, actual pg_cron dispatch and durable pgmq jobs. Hosted Supabase deployment remains stage two.
 - [ ] Evaluate maintained China publishers against actual accounts before adding their adapters; pin reviewed versions.
 - [ ] Run repeated original-content cycles and record actual performance/cost.
 - [x] Implement official regional RSS discovery and verify a real four-country collection.
-- [ ] Integrate independent factual research and permitted automatic analytics.
-- [ ] Decide whether the initial complete stage-one platform set can be smaller than all requested destinations.
+- [x] Integrate independent source retrieval and real Codex web research. Automatic platform analytics remain channel-dependent; manual observations are supported.
+- [x] Preserve all requested platform targets; the local-product scope supports native handoff when an authorized API is unavailable, as explicitly requested by the owner.
 - [ ] Start stage-two implementation only after the stage-one gate is achieved.
 
 Implementation, local tests, account creation, live publication, cloud persistence and cloud deployment are independent milestones. Do not merge them into one “complete” status.
@@ -77,21 +77,37 @@ Implementation, local tests, account creation, live publication, cloud persisten
 
 The actual Codex draft has four platform variants, four Xiaohongshu PNGs and a 47.96-second portrait narrated MP4, internally approved at revision 7. The later live YouTube run completed the real Desktop OAuth grant, a single upload and official public/processed readback plus separate Studio/player checks. YouTube is now Connected; the other three verified accounts remain Blocked. See [run evidence](news-run-2026-10-10.zh-CN.md) and the scoped acceptance above. The 83-test implementation checks preceded this live delivery; this documentation update did not rerun them.
 
-## Planned Web workflow acceptance
+## Current Web workflow acceptance
 
-The following user-requested capabilities are design requirements, not completed functionality. See [Web design](web-product-design.zh-CN.md) and the newer [local-first build review](local-first-build-review.zh-CN.md) for L0-L5 milestones. Complete local application functionality and each channel's permission/live-delivery acceptance must be reported separately; the initial channel set is not silently narrowed.
+The original design requirements below are implemented in the local Web application. Check marks require executed evidence, not just code. This list combines executed product API/database/model evidence and the explicitly identified Chrome checks; it does not claim every button was clicked. See [local system delivery](local-system-delivery.zh-CN.md) for the tested paths and limitations. Complete local application functionality and each channel's permission/live-delivery acceptance remain separate.
 
-- [ ] Start local Supabase DB/Auth/Storage/pgmq/pg_cron without a hosted project; verify actual service health and loopback-only listening.
-- [ ] Provide verified local setup/start/stop/status/upgrade and backup/restore operations; browser closure does not stop work, and sleep/restart follows the documented missed-run policy.
-- [ ] Keep real local data and resettable test instances separate; replay migrations only against an explicitly disposable test target.
-- [ ] Restore database plus actual media bytes into an isolated instance; check hashes, references and receipts, keep publishing paused, and reconcile unknown external submissions.
-- [ ] Represent known private/unlisted/deleted visibility separately from unknown submission outcomes and preserve historical publication evidence.
+- [x] Start local Supabase DB/Auth/Storage/pgmq/pg_cron without a hosted project; verify actual service health and loopback-only listening.
+- [x] Verify local setup/start/stop/status/upgrade and backup/restore operations. API/worker run independently of the browser. Service stop/start and missed-run SQL behavior were tested; a physical Mac reboot/sleep cycle was not performed.
+- [x] Keep real local data and resettable test instances separate; replay migrations only against an explicitly disposable test target.
+- [x] Restore database plus actual media bytes into an isolated instance; check hashes, references and receipts, keep publishing paused, and reconcile unknown external submissions.
+- [x] Represent known private/unlisted/deleted visibility separately from unknown submission outcomes and preserve historical publication evidence.
 
-- [ ] Create, edit, pause and run discovery schedules with a prompt, selected assets, explicit time/timezone, missed-run policy and durable run history.
-- [ ] View 0–20 sourced, deduplicated hot questions for each run and select a question for fine-grained creation.
-- [ ] Persist a master revision first, then independently generate and validate the requested platform versions.
-- [ ] Refine the master, a platform or a selection through Web Codex instructions; compare and accept changes without stale responses overwriting edits.
-- [ ] Propagate master updates to untouched drafts, preserve customized fields, surface conflicts and stale facts, and invalidate only the affected publication approvals.
-- [ ] Upload and reuse images from one asset library in schedules and generation/refinement; verify selected reference images actually reach the model.
-- [ ] Create an independent video script only after an explicit Web action; render separately and never automatically rerender after a master update.
-- [ ] Recover immutable content/media revisions and inspect exact historical publication snapshots, target accounts, IDs and URLs from the Web.
+- [x] Create, edit, pause and run discovery schedules with a prompt, selected assets, explicit time/timezone, missed-run policy and durable run history.
+- [x] View 0–20 sourced, deduplicated hot questions for each run and select a question for fine-grained creation.
+- [x] Persist a master revision first, then independently generate and validate the requested platform versions.
+- [x] Refine through the Web product API and review/apply a proposal: the real XHS-only title change preserved the master and all other platform fields; stale-response/atomic-apply behavior is covered by database tests.
+- [x] Propagate master updates to untouched drafts, preserve customized fields, surface conflicts and stale facts, and invalidate only the affected publication approvals.
+- [x] Upload and reuse images from one asset library in schedules and generation/refinement; verify selected reference images actually reach the model.
+- [x] Create an independent video script only after an explicit product action (API acceptance); render separately and never automatically rerender after a master update.
+- [x] Recover immutable content/media revisions and inspect exact historical publication snapshots, target accounts, IDs and URLs from the Web.
+
+### Current executed evidence
+
+- 143/143 automated tests passed with no skips, plus real local Supabase task/operation SQL checks, production build and HTTP smoke.
+- A real Codex task fetched W3C evidence, consumed one selected reference image, and generated a master plus Xiaohongshu/Reddit/X/YouTube drafts. An independent discovery run returned two sourced candidates.
+- Frequency transitions preserve the same task and its input; actual scheduled dispatch and persistent queue recovery were tested in disposable database workspaces.
+- A separate explicitly requested video script was generated and rendered through the product API: 19.23-second 1080×1920 H.264/AAC MP4. The selected image is visible in an inspected frame.
+- An isolated cold restore checked 15 Storage objects, 109 legacy media files, 76 content/run artifacts, business-table counts, hashes, loopback-only ports and paused/no-replay state. Restored new video and legacy snapshot paths served matching bytes through a separate API. Only that temporary API/stack was stopped afterward.
+- Current read-only refresh of both pre-existing YouTube videos confirmed the withdrawn video as `delivered/private` and the replacement as `published/public`; both retain one original attempt and the same remote IDs. No new video was submitted.
+- Full Chrome click-through acceptance is still separate: earlier specified-profile form/frequency/layout checks passed; the remaining browser session was blocked by automatic approval review while an unrelated private page was foreground. The user was asked to foreground the local page. API/database/model validation does not count as completed Chrome interaction.
+
+- Real editor acceptance completed: r3→r4 synchronized all four platform adaptations, preserving the intentionally customized XHS title with a visible conflict. A reviewed title-only XHS proposal applied atomically at expected r4 to produce r5; the master and all untargeted fields stayed identical. Seven downloaded files and r1–r5 history were checked.
+- Final r7 attaches the existing explicit video and reference image. X, Reddit and Xiaohongshu each have one `awaiting_operator` job with five steps, exact immutable export, working media downloads and same-job continuation. No new external post was sent.
+- [ ] Complete the remaining end-to-end Chrome click-through after the owner foregrounds the local application in the specified profile.
+
+- Final `local:upgrade` applied migrations 001–006 as a no-op and created a fresh complete backup with 15 Storage objects, 109 media files, 104 content/run artifacts and two encrypted upload journals. Final build/start/HTTP smoke passed; database/pgmq/cron are healthy. Restart retained draft r7 and the three native handoff jobs with zero attempts. Publishing remains paused and both acceptance task schedules are disabled.

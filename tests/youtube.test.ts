@@ -38,6 +38,18 @@ async function fixture(): Promise<{ directory: string; id: string; draftId: stri
   const job = await scheduleJob({ draftId: draft.id, accountId: account.id, scheduledAt: new Date().toISOString() });
   return { directory, id: job.id, draftId: draft.id, media, cleanup: async () => { await rm(directory, { recursive: true, force: true }); delete process.env.STUDIO_DATA_DIR; } };
 }
+test('invalid description characters fail before OAuth or a resumable upload request', async () => {
+  const fixtureData = await fixture(); let requests = 0; let tokenReads = 0;
+  try {
+    await assert.rejects(uploadYouTubeJob(fixtureData.id, { ...settings, descriptionDisclosure: 'AI-assisted <synthetic narration> disclosure.' }, {
+      tokenProvider: async () => { tokenReads++; return 'fixture-token'; },
+      fetcher: mockFetch(() => { requests++; return json({}); }),
+    }), /metadata exceeds supported API limits/);
+    assert.equal(requests, 0); assert.equal(tokenReads, 0);
+    assert.equal((await readState()).jobs[0]?.status, 'scheduled');
+    await assert.rejects(stat(join(fixtureData.directory, 'youtube', 'uploads', `${fixtureData.id}.json`)), { code: 'ENOENT' });
+  } finally { await fixtureData.cleanup(); }
+});
 test('channel verification refuses a different or ambiguous OAuth target', async () => {
   for (const items of [[{ id: 'UCwrong' }], [{ id: expectedYouTubeChannelId }, { id: 'UCother' }], []]) await assert.rejects(verifyYouTubeChannel({ tokenProvider: async () => 'fixture-token', fetcher: mockFetch(() => json({ items })) }), /different or ambiguous/);
 });
@@ -99,7 +111,7 @@ test('a delayed readback cannot downgrade a newer confirmed publication', async 
   const fixtureData = await fixture(); const reading = deferred<void>(); const response = deferred<Response>();
   let earlier: Promise<Awaited<ReturnType<typeof reconcileYouTubeJob>>> | undefined;
   try {
-    assert.equal((await uploadYouTubeJob(fixtureData.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch('private') })).status, 'queued');
+    assert.equal((await uploadYouTubeJob(fixtureData.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch('private') })).status, 'delivered');
     earlier = reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch(url => {
       if (url.pathname === '/youtube/v3/channels') return json({ items: [{ id: expectedYouTubeChannelId }] });
       reading.resolve(); return response.promise;
@@ -112,14 +124,53 @@ test('a delayed readback cannot downgrade a newer confirmed publication', async 
     assert.deepEqual((await readState()).jobs[0], newer);
   } finally { response.resolve(readback('private')); await earlier?.catch(() => undefined); await fixtureData.cleanup(); }
 });
-test('a previously published video becoming private needs inspection and retains its publication receipt', async () => {
+test('a published video becoming processed private/unlisted is delivered and retains its publication receipt', async () => {
+  for (const privacy of ['private', 'unlisted']) {
+    const fixtureData = await fixture();
+    try {
+      const published = await uploadYouTubeJob(fixtureData.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch() });
+      const hidden = await reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch(privacy) });
+      assert.equal(hidden.status, 'delivered'); assert.equal(hidden.visibility, privacy); assert.equal(hidden.error, null);
+      assert.equal(hidden.remoteId, published.remoteId); assert.equal(hidden.remoteUrl, published.remoteUrl); assert.equal(hidden.attempts, published.attempts);
+      assert.ok(hidden.history.some(item => item.status === 'published'));
+      assert.equal((await reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch(privacy) })).status, 'delivered');
+    } finally { await fixtureData.cleanup(); }
+  }
+});
+
+test('a matching explicit empty/non-OK readback marks a published video uncertain without another upload', async () => {
+  for (const unavailable of [() => json({ items: [] }), () => new Response(null, { status: 403 })]) {
+    const fixtureData = await fixture(); const requests: string[] = [];
+    try {
+      const published = await uploadYouTubeJob(fixtureData.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch() });
+      const uncertain = await reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => {
+        requests.push(init.method ?? 'GET'); assert.equal(init.method, 'GET');
+        return url.pathname === '/youtube/v3/channels' ? json({ items: [{ id: expectedYouTubeChannelId }] }) : unavailable();
+      }) });
+      assert.equal(uncertain.status, 'needs_reconciliation'); assert.equal(uncertain.remoteId, published.remoteId); assert.equal(uncertain.remoteUrl, published.remoteUrl);
+      assert.equal(uncertain.providerPostId, published.providerPostId); assert.equal(uncertain.attempts, published.attempts);
+      assert.deepEqual(uncertain.history.slice(0, published.history.length), published.history); assert.deepEqual(requests, ['GET', 'GET']);
+    } finally { await fixtureData.cleanup(); }
+  }
+});
+
+test('an upload catch cannot downgrade a concurrently confirmed publication', async () => {
   const fixtureData = await fixture();
   try {
-    const published = await uploadYouTubeJob(fixtureData.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch() });
-    const hidden = await reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch('private') });
-    assert.equal(hidden.status, 'needs_reconciliation'); assert.match(hidden.error ?? '', /historical publication receipt is preserved/);
-    assert.equal(hidden.remoteId, published.remoteId); assert.equal(hidden.remoteUrl, published.remoteUrl);
-    assert.equal((await reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch('private') })).status, 'needs_reconciliation');
+    const upstream = successfulUploadFetch();
+    await assert.rejects(uploadYouTubeJob(fixtureData.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch(async (url, init) => {
+      if (init.method === 'PUT' && init.body) {
+        await mutateState(state => {
+          const job = state.jobs.find(item => item.id === fixtureData.id); assert.ok(job);
+          job.status = 'published'; job.submissionOwner = null; job.remoteId = videoId; job.remoteUrl = `https://www.youtube.com/watch?v=${videoId}`;
+          job.history.push({ at: new Date().toISOString(), status: 'published', message: 'Independent confirmed fixture receipt.' });
+        });
+        throw new Error('Lost original upload response after independent confirmation.');
+      }
+      return upstream(url, init);
+    }) }), /preserved for reconciliation/);
+    const saved = (await readState()).jobs[0]; assert.equal(saved?.status, 'published'); assert.equal(saved?.remoteId, videoId);
+    assert.equal(saved?.history.at(-1)?.status, 'published'); assert.equal(saved?.attempts, 1);
   } finally { await fixtureData.cleanup(); }
 });
 test('upload completion cannot overwrite a changed submission owner or recovered job state', async () => {
@@ -189,12 +240,13 @@ test('a lost binary-upload response is reconciled by empty PUT and existing vide
     const result = await reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher }); assert.equal(result.status, 'published'); assert.equal(posts, 1); assert.equal(binaryPuts, 1); assert.equal(probes, 1);
   } finally { await fixtureData.cleanup(); }
 });
-test('private/unlisted readback remains queued, and wrong-channel readback never becomes published', async () => {
+test('private/unlisted processed uploads are delivered without claiming public publication', async () => {
   for (const [privacy, channel] of [['private', expectedYouTubeChannelId], ['unlisted', expectedYouTubeChannelId], ['public', 'UCwrong']] as const) {
     const fixtureData = await fixture();
     try {
       const result = await uploadYouTubeJob(fixtureData.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => { if (url.pathname === '/youtube/v3/channels') return json({ items: [{ id: expectedYouTubeChannelId }] }); if (init.method === 'POST') return new Response(null, { headers: { Location: session } }); if (init.method === 'PUT') return json({ id: videoId }, 201); return readback(privacy, channel); }) });
-      assert.equal(result.status, channel === expectedYouTubeChannelId ? 'queued' : 'needs_reconciliation'); assert.equal(result.remoteUrl, null);
+      assert.equal(result.status, channel === expectedYouTubeChannelId ? 'delivered' : 'needs_reconciliation'); assert.equal(result.remoteUrl, channel === expectedYouTubeChannelId ? `https://www.youtube.com/watch?v=${videoId}` : null);
+      if (channel === expectedYouTubeChannelId) { assert.equal(result.visibility, privacy); assert.equal(result.remoteId, videoId); }
     } finally { await fixtureData.cleanup(); }
   }
 });

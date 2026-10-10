@@ -1,3 +1,4 @@
+import { loadRuntimeEnvironment } from '../core/runtime-env.ts';
 import { readFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
@@ -12,6 +13,8 @@ import { discoverTrends, discoveryCountrySchema } from '../core/discovery.ts';
 import { saveDiscoverySnapshot } from '../core/discoverySnapshot.ts';
 import { addAccount, approveDraft, cancelJob, confirmPublication, createDraft, exportJob, pausePublishing, reconcileJob, recordMetrics, replaceDraft, runDueJobs, scheduleJob, updateAccount, verifyDraftApproval } from '../core/pipeline.ts';
 import { buildMedia } from '../core/media.ts';
+
+await loadRuntimeEnvironment();
 
 const loadJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
 const required = (value: string | undefined, name: string): string => { if (!value) throw new Error(`Missing ${name}`); return value; };

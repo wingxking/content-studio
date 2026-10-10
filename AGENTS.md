@@ -17,4 +17,4 @@
 
 - For content research, discovery/scheduler prompts, generation and refinement, use `.agents/skills/content-editorial/SKILL.md` and `docs/content-growth-guidance.md`.
 - The owner's editorial exclusions take precedence over reach: exclude gender discrimination, religion, war/armed conflict, politics/elections/geopolitics, and the additional sensitive themes defined in `src/core/content-prompts.ts`. Do not reframe an excluded topic as a neutral explainer.
-- Keep shared prompt policy in `src/core/content-prompts.ts`; article generation executes it, while discovery/refinement/video builders are prompt exports until their respective workers are implemented. Generated safety assessment is model-reported, not independent moderation or publication clearance.
+- Keep shared prompt policy in `src/core/content-prompts.ts`; task research, article generation, discovery, refinement and explicit video-script workers execute it. Keep prompt builders reusable and distinguish them from durable job execution. Generated safety assessment is model-reported, not independent moderation or publication clearance.

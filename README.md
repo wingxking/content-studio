@@ -1,98 +1,82 @@
 # Content Studio
 
-A local content production workbench for one Mac and Codex. Generate sourced articles and platform versions, review them, make image cards or narrated videos, then track deliveries and measured performance.
+A local content workbench for one Mac and Codex. The Web UI manages reusable creation/discovery tasks, one-time/daily/weekly execution, sourced master drafts, platform adaptations, assets, independent video projects, and publication receipts.
 
-The local generation, review, media, and delivery-coordination foundation is implemented. Official regional trend RSS collection and an explicit official YouTube API uploader are implemented. Two reviewed videos were submitted once each through official YouTube OAuth/API. The first was subsequently withdrawn to Private at the owner’s request; the replacement AI-agent education video is public/processed and listed on the correct channel. Independent factual research and broader multi-platform acceptance remain unfinished. Stage one has not passed overall acceptance; stage two has not started. See [current progress and architecture in Chinese](docs/progress-and-architecture.zh-CN.md).
+Cloud deployment remains a later phase. Local installation still needs network access for Codex models, public sources, and authorized platform APIs.
 
-## Run
+## Start locally
 
 ```sh
 npm ci
-npm run doctor
-npm run dev
+npm run local:setup
+npm run build
+npm run local:start
+npm run local:status
 ```
 
-Open http://127.0.0.1:4310 in **Chrome profile `radarxai@gmail.com`**. The server listens only on loopback. Keep it running and the Mac awake for the 30-second queue dispatcher. Stopping the server or sleeping the Mac pauses execution; due work is processed when it resumes.
+Open **http://127.0.0.1:4310** in **Chrome profile `radarxai@gmail.com`**. Setup uses the existing Docker Desktop and Supabase CLI. First installation downloads the pinned Supabase images and can take considerable time. The local stack has its own project ID, ports, network and persistent volumes; no hosted Supabase project is required.
 
-Use your existing local Codex authentication. The app detects the official desktop-bundled executable, avoiding a broken `codex` PATH shortcut found on this Mac. You can override its executable with `CODEX_BIN`. It does not copy authentication tokens or require an OpenAI API key for stage one.
+The API and a separate worker run under macOS `launchd`. Closing the browser or Codex chat does not stop a task. The Mac must be awake and Docker available; missed recurring schedules resume at the most recent eligible occurrence, without replaying an unlimited backlog. A once task with no date is manual-only. “Save and run” consumes a once task's scheduled occurrence.
 
-## What works
+The application discovers the installed Codex model catalog and prefers the official desktop-bundled Codex executable. It uses existing local Codex sign-in. Authentication/model availability is confirmed by a real successful run, not just finding an executable.
 
-- Official Google Trends RSS discovery for US, IN, GB and ZA; time-stamped regional candidates and unverified news references.
-- Sourced brief → real Codex structured generation → master article and platform variants.
-- Versioned editing and approval tied to content and actual media hashes.
-- PNG card rendering with librsvg; actual narrated MP4 rendering with FFmpeg and macOS speech.
-- Account metadata for 12 channels, target-specific scheduling, durable state, pause, duplicate prevention, and crash recovery.
-- Documented Postiz API adapter for **X and LinkedIn text** when authorized integrations and an API key are configured.
-- Official YouTube Desktop OAuth, channel verification, resumable upload journal and API status readback through explicit CLI commands; two real submissions on the verified RadarXAI channel; the old topic is now Private and the new education video is public.
-- Native packages for other channels, with genuine human handoff where automation is prohibited and checked post-ID/URL receipts.
-- X trend-derived content is blocked from automatic Postiz delivery at scheduling and final dispatch.
-- Manually entered performance snapshots from measured account analytics.
-- Optional **Supabase** persistence; no other database dependency.
+## Web workflow
 
-`discover` automatically collects regional RSS candidates and related news URLs, preserving the observation time, feed date and separate traffic buckets. It never claims a global number-one trend or converts RSS headlines into verified facts. A researcher must independently verify the event and enter source excerpts before generation; the generator does not browse. Competitor analysis and automatic analytics remain unfinished.
+1. Create a **content** or **discovery** task. Enter title, instructions, optional audience/angle/source material, model, reference images and target platforms.
+2. Select **once**, **daily**, or **weekly** in the same task. Change frequency later without recreating the task. Save or run immediately.
+3. Discovery produces zero to twenty sourced questions. Choose one and refine its creation brief. The system does not claim a verified global “number-one” trend.
+4. Content generation saves the master checkpoint first, then each platform draft. Completed stages and local files remain available if a later stage fails. Retry continues the same run.
+5. Edit the master or an individual platform draft. A master edit schedules adaptation; independent platform fields are preserved and conflicts are shown. Web Codex refinement creates a reviewable proposal that can be accepted or rejected.
+6. Upload/reuse assets. Reference images are actually passed to Codex. Publishing attachments are selected separately.
+7. For a video, explicitly create a separate script, edit it, then explicitly render. The renderer uses selected images, readable text cards and macOS narration to produce an MP4. Choosing a video platform alone never renders a video.
+8. Select actual accounts and click **authorize and publish this revision**. Supported authorized APIs run in the worker; other destinations show a native portal, copy buttons, downloads and numbered instructions. Record the actual platform URL and ID after native publication.
+9. Continue failed/unfinished deliveries from their existing records. A remote outcome that is unknown is reconciled before any retry. Uploaded private/unlisted YouTube videos are distinguished from public publication.
 
-The native route prepares content and records publication evidence. Review each platform's authorization and content eligibility before any creator-page operation. X trend posts require genuine human publication; Reddit agent access requires an approved App. Do not use Codex clicks or headless browsers to bypass those requirements. The explicit YouTube CLI uses authorized Data API OAuth, not Chrome cookies; its background queue does not automatically invoke uploads. The current [AI-agent education video](https://www.youtube.com/watch?v=X8dDltMseM4) is confirmed public/processed by the API and Public/Published in the intended Studio Shorts list. Its signed-in player reached 36/46 seconds; full playback and subjective quality acceptance remain separate. The former video aKaJ3qBAhCc is confirmed Private after Studio Save and official API readback. X, Reddit and Xiaohongshu remain unsubmitted; see the [replacement publication record](docs/ai-agent-education-run-2026-10-10.zh-CN.md).
+## Publishing capabilities
 
-## Planned Web workflow upgrade
+- **YouTube:** existing Desktop OAuth, exact channel verification, durable resumable-upload journal, and official API readback. Web publishing requires a real attached MP4 and explicit visibility/disclosure settings. Browser sign-in alone is not API authorization.
+- **Postiz:** configured and authorized X/LinkedIn text integrations only. Trend-derived X automation is blocked.
+- **X trends, Xiaohongshu, Reddit and other native paths:** owner completes the permitted creator workflow. The app provides content, media and precise handoff steps; it does not claim that a handoff is automatic publication. Reddit automated access needs the platform's required App approval.
 
-The new design covers promptable discovery schedules, up to 20 sourced questions per run, a versioned master with independently editable platform adaptations, Web AI instructions with safe merges, a reusable asset library, explicitly created video drafts, and historical publishing snapshots. These new workflow features are planned, not implemented. The latest [local-first build review](docs/local-first-build-review.zh-CN.md) fixes the baseline as a complete local Supabase stack and defines L0-L5 acceptance, backup/recovery, and future cloud migration. Cloud work remains research only. These are construction requirements, not a claim that the local stack has been installed. The local Web Research & setup page links to the three supporting documents:
+Existing live-publication evidence is retained in [acceptance](docs/acceptance.md) and the [previous YouTube run](docs/ai-agent-education-run-2026-10-10.zh-CN.md). It is separate from the current local-system validation. No public test post is implied by starting the server, running content generation or approving an editorial proposal.
 
-- [Web product design and phased acceptance](docs/web-product-design.zh-CN.md)
-- [Local and production technical architecture](docs/web-technical-architecture.zh-CN.md)
-- [Current official product research](docs/research-web-workflows-2026-10-10.zh-CN.md)
-- [Runnable GitHub products and limited local trials](docs/research-github-runnable-2026-10-10.zh-CN.md)
+## Data and recovery
 
-## Production workflow
+Supabase Postgres is the local database, with private Supabase Storage, `pg_cron` scheduling and a durable `pgmq` queue. Tasks, runs, revision records, operations, assets and video projects have dedicated tables. The existing draft/account/publication aggregate retains its optimistic CAS contract during this migration; it is not yet a fully normalized multi-tenant cloud model.
 
-1. Run regional discovery, select a candidate and independently research primary/independent sources, or use your own original experiment. Enter the relevant source excerpts in the brief.
-2. Generate or import the content package; review each platform's content and facts.
-3. Approve the text; make media or attach your own files. Review the complete assets and approve the new revision.
-4. Check the intended account in the requested Chrome profile. Store safe metadata and the current blocker in Channels & accounts.
-5. Schedule an approved variant to that account. The queue submits configured API jobs and prepares native handoffs.
-6. For authorized YouTube jobs, explicitly invoke the official uploader and reconcile its existing session/video. For other destinations, follow the recorded permitted route; genuinely human publication is required where policy prohibits automation. Verify the actual ID, account, URL and public visibility.
-7. Record actual analytics later. Unavailable metrics remain null.
+Ignored `.studio/` holds runtime configuration, local content exports, cached/generated media, restricted OAuth files and upload journals. New files include:
 
-## Codex commands
+- `content/<draft-id>/master.md`, platform `.md` files, source material and immutable `revision-N/` snapshots.
+- `runs/<run-id>/master.md`, platform `.md` files and a structured run package, including partial completed work.
+- Local media and its private Storage copy, linked through stable asset IDs for new selections.
+
+Never commit `.studio/`, credentials, raw Codex logs, cookies or browser profiles. The Web browser never receives the Supabase service-role key.
 
 ```sh
-npm run studio -- discover US,IN,GB,ZA 24
-npm run studio -- generate config/first-brief.json
-npm run studio -- status
-npm run studio -- approve <draft-id>
-npm run studio -- media <draft-id> youtube
-npm run studio -- approve <draft-id>
-npm run studio -- account <account.json>
-npm run studio -- schedule <schedule.json>
-npm run studio -- run
-npm run studio -- export <job-id> /private/tmp/publishing-package
-npm run studio -- receipt <job-id> <actual-platform-url> <actual-post-id>
-npm run studio -- pause
-# After Google Cloud setup and an explicit OAuth grant:
-npm run studio -- youtube-auth /absolute/path/to/desktop-client.json
-npm run studio -- youtube-channel
-npm run studio -- youtube-upload <job-id> config/youtube-upload-settings.json
-npm run studio -- youtube-reconcile <job-id>
+npm run local:backup
+npm run local:restore -- /absolute/backup-folder --target /new/isolated-folder
+npm run local:upgrade
+npm run local:stop
 ```
 
-`config/content.schema.json` describes an import package. Angle/audience/source data are required; there is no fabricated sample content or default account that can accidentally be published.
+Backup stops this project's application services and pauses publishing/schedulers. It includes database data, actual Storage bytes, local artifact files, integrity checks and separately encrypted private journals. The private recovery key stays outside the backup; preserve it securely. Restore targets a new isolated stack, defaults to paused, and never replays active queue rows or repeats an uncertain remote upload. Use `--restore-private` only when restoring the locally encrypted authorization/journal bundle is intended. After inspecting a backup/upgrade, restart with `local:start`; resume publishing explicitly from the Web queue when appropriate.
 
-## Dependencies and data
-
-Node.js 24+, npm, authenticated Codex CLI. Media generation needs `rsvg-convert`, `ffmpeg`, `ffprobe`, and macOS `say`, which were found on this Mac. A particular speech voice may need installation through macOS if unavailable. `STUDIO_TTS_VOICE` selects an installed voice.
-
-Local mode stores single-operator artifacts in ignored `.studio/`: state, discovery snapshots, media, private YouTube credentials and upload journals. Credential/journal files use mode 0600 and private directories 0700. Never track this directory or share session URLs. This is the local workspace mode, not a multi-tenant database. For database persistence, apply the Supabase migration and export `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and a UUID `STUDIO_WORKSPACE_ID` together. The server performs optimistic revision checks; the browser never receives the secret key. Migration application and remote Supabase persistence have not been live-verified. See [architecture](docs/architecture.md).
-
-For Postiz, export `POSTIZ_API_KEY` and optionally `POSTIZ_BASE_URL`. Account credentials stay in Postiz or the native platform session. Do not put secrets, cookies, or browser profiles in tracked files.
-
-## Verify
+## Verify and architecture
 
 ```sh
 npm run typecheck
 npm test
 npm run build
-# With the local server running:
 npm run test:http
+node --import tsx tests/task-database-smoke.ts
 ```
 
-See [latest independent research](docs/research-industry-v2.zh-CN.md), [current platform policies](docs/platform-policies-v2.zh-CN.md), [current news evidence](docs/news-topic-2026-10-10.zh-CN.md), [research](docs/research.md), [accounts and access](docs/accounts.md), [architecture](docs/architecture.md), and [acceptance](docs/acceptance.md). Account registration, app review, public publishing, and stage-two independence must each be verified separately.
+The database smoke test requires the running local stack and uses a disposable workspace. Tests, a built page, account registration and successful publication are separate evidence categories. See [local implementation and validation](docs/local-system-delivery.zh-CN.md) for current results.
+
+- [Local-first build baseline and cloud migration plan](docs/local-first-build-review.zh-CN.md)
+- [Web product design](docs/web-product-design.zh-CN.md)
+- [Technical architecture](docs/web-technical-architecture.zh-CN.md)
+- [Platform policies](docs/platform-policies-v2.zh-CN.md)
+- [Account setup and blockers](docs/accounts.md)
+
+Node.js 24+, Docker Desktop, Supabase CLI and authenticated Codex are required. Video rendering also needs FFmpeg/ffprobe, librsvg and macOS `say`. Cloud implementation, production Web OAuth, multi-user authorization and replacing the Mac/Codex adapters remain stage two.

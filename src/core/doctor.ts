@@ -2,21 +2,26 @@ import { access, mkdir } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { codexExecutable } from './generator.ts';
 import { dataDirectory, readState, storageMode } from './store.ts';
+import { dbRpc } from './database.ts';
+import { listModels } from './models.ts';
 
 export async function doctor(): Promise<Record<string, unknown>> {
-  let codexAvailable = false;
-  let codexPath: string | null = null;
-  try { codexPath = await codexExecutable(); codexAvailable = true; } catch { /* Report availability without invoking generation. */ }
-  let stateReadable = false;
-  let localWritable = false;
-  let storage: string = 'invalid';
-  let stateError: string | null = null;
-  let paused: boolean | null = null;
-  let connectedAccounts = 0;
+  let codexAvailable = false; let codexPath: string | null = null;
+  try { codexPath = await codexExecutable(); codexAvailable = true; } catch { /* Report availability without starting a generation. */ }
+  let stateReadable = false; let localWritable = false; let storage = 'invalid'; let stateError: string | null = null;
+  let paused: boolean | null = null; let connectedAccounts = 0; let localServices: unknown = null;
   try {
-    storage = storageMode();
-    if (storage === 'local') { await mkdir(dataDirectory(), { recursive: true, mode: 0o700 }); await access(dataDirectory(), constants.W_OK); localWritable = true; }
+    storage = storageMode(); await mkdir(dataDirectory(), { recursive: true, mode: 0o700 }); await access(dataDirectory(), constants.W_OK); localWritable = true;
     const state = await readState(); stateReadable = true; paused = state.paused; connectedAccounts = state.accounts.filter(account => account.status === 'connected').length;
+    if (storage === 'supabase') localServices = await dbRpc('studio_runtime_health');
   } catch (error) { stateError = error instanceof Error ? error.message : 'Storage check failed.'; }
-  return { stage: 1, requiredGoogleAccount: 'radarxai@gmail.com', codexAvailable, codexPath, codexAuthentication: 'Verify by running a real generation; executable availability does not prove sign-in.', storage, dataDirectory: dataDirectory(), stateReadable, localWritable, stateError, paused, connectedAccounts, postizConfigured: Boolean(process.env.POSTIZ_API_KEY), automaticTextPlatforms: ['x', 'linkedin'], sourceDiscovery: 'Official regional Google Trends RSS via explicit discover CLI; related news references require independent verification.', youtubePublishing: 'Explicit official API CLI with private Desktop OAuth; real authorization/upload acceptance is separate.', xPolicy: 'Trend-derived automated X publication is blocked; native handoff requires a genuine human.', videoGeneration: 'Local portrait video renderer is available with ffmpeg and macOS speech; render and attach actual media before scheduling video channels.', stageTwoGate: 'Complete stage-one live acceptance before starting stage two.' };
+  const models = await listModels().catch(() => []);
+  return { stage: 1, requiredGoogleAccount: 'radarxai@gmail.com', codexAvailable, codexPath, modelCount: models.length,
+    codexAuthentication: '真实任务成功才确认模型认证可用。', storage, dataDirectory: dataDirectory(), stateReadable, localWritable, stateError, paused, connectedAccounts, localServices,
+    postizConfigured: Boolean(process.env.POSTIZ_API_KEY), automaticTextPlatforms: process.env.POSTIZ_API_KEY ? ['x (非热点)', 'linkedin'] : [],
+    sourceDiscovery: '统一一次/每天/每周任务，研究真实来源，最多 20 个有来源的选题；不声称全球热度排名。',
+    youtubePublishing: '授权的 YouTube API + 持久上传记录；先手动制作真实视频，再点击发布。',
+    xPolicy: '热点相关的 X 内容交由账号所有者在原生页面发布。',
+    videoGeneration: '独立视频稿，手动生成解说和素材幻灯片，使用 FFmpeg 与 macOS 语音；图片可作为真实画面。',
+    stageTwoGate: '本地验收通过后才开始云端实施。' };
 }

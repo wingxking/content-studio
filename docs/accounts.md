@@ -60,11 +60,11 @@ Current onboarding is complete: the dedicated Desktop AI-agent client exists in 
 
 External Testing grants containing YouTube scopes and their refresh tokens expire after seven days; reauthorization is needed for a continuing test. Upload plus read-only is the minimum pair used here for upload, exact channel verification, and private/processing readback. These scopes must be reviewed on the actual consent screen. Approval, client creation, user grant, and a real public video remain separate milestones. Official setup references: [consent configuration](https://developers.google.com/workspace/guides/configure-oauth-consent), [client and AI-agent designation](https://support.google.com/cloud/answer/15549257?hl=en), [Testing restrictions](https://support.google.com/cloud/answer/15549945?hl=en). The private local uploader is limited to reviewed MP4s up to 512 MiB; it does not stream unlimited files or automatically resend partial uploads.
 
-## Supabase task
+## Current local Supabase setup
 
-Database is optional for stage one's local workspace artifacts. When database persistence is needed, use Supabase. Existing authenticated access was observed, but the selected organization has a capacity warning and no project was selected for this product. Local Supabase is not running: Docker CLI exists but its daemon socket is absent. The migration is supplied for a dedicated project. Project creation requires database credentials that the user must enter directly and can also encounter account/legal/billing gates.
+The complete local product now uses the dedicated Supabase CLI project `content-studio-local`: API 55421 and Postgres 55422, both bound to loopback. Docker, database/Auth/private Storage, pgmq and pg_cron have been exercised on this Mac. Migrations 001–006 are applied. Server-only runtime values stay in ignored `.studio/runtime.env`; the browser never receives the service-role key.
 
-Next action: select or provision a dedicated eligible Supabase project, apply `supabase/migrations/202610100001_content_studio.sql`, configure the three server-only environment values, and run read/write/restart acceptance. Do not place the secret key into the browser or chat. No paid plan or quota change is implied by the task.
+Use `npm run local:setup`, `npm run local:start` and `npm run local:status`; see [local system delivery](local-system-delivery.zh-CN.md) for acceptance and backup/restore. The existing hosted `radar` project is not the application's database and was not modified. Hosted Supabase selection and cloud production deployment remain stage two. Earlier observations that the local Docker daemon was unavailable are historical and have been superseded by this running installation.
 
 ## Computer Use restriction
 

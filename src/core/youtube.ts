@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { type Job, type StudioState } from './model.ts';
 import { exportJob, verifyDraftApproval } from './pipeline.ts';
+import { resolveMediaLocation } from './media-location.ts';
 import { dataDirectory, mutateState, readState } from './store.ts';
 import { desktopYouTubeTokenProvider, readPrivateJson, writePrivateJson } from './youtube-oauth.ts';
 
@@ -59,14 +60,22 @@ export async function verifyYouTubeChannel(input: Transport = {}): Promise<{ cha
   return { channelId: expectedYouTubeChannelId };
 }
 function validatedSession(value: string): string { const url = new URL(value); if (url.protocol !== 'https:' || url.hostname !== 'www.googleapis.com' || url.port || url.username || url.password || !/^\/(?:resumable\/)?upload\/youtube\/v3\/videos$/.test(url.pathname)) throw new Error('YouTube upload session endpoint was not trusted.'); return url.toString(); }
-async function loadJournal(id: string): Promise<Journal | null> { try { return journalSchema.parse(await readPrivateJson(journalPath(id))); } catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null; throw new Error('YouTube upload journal is invalid; preserve it and inspect before any upload.'); } }
+async function loadJournal(id: string): Promise<Journal | null> {
+  let saved: unknown;
+  try { saved = await readPrivateJson(journalPath(id)); }
+  catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null; throw new Error('YouTube upload journal is invalid; preserve it and inspect before any upload.'); }
+  const marker = z.object({ jobId: z.uuid(), restoredJournalMarker: z.literal(true) }).safeParse(saved);
+  if (marker.success && marker.data.jobId === id) throw new Error('This restored upload has a journal-presence marker. Restore its encrypted private journal with --restore-private, or inspect the existing upload in YouTube Studio and record the verified receipt; do not start another upload.');
+  try { return journalSchema.parse(saved); }
+  catch { throw new Error('YouTube upload journal is invalid; preserve it and inspect before any upload.'); }
+}
 async function saveJournal(journal: Journal): Promise<void> { await writePrivateJson(journalPath(journal.jobId), journalSchema.parse({ ...journal, at: now() })); }
 async function failUnknown(id: string, expectedFingerprint?: string, submissionOwner?: string): Promise<Job> {
   return mutateState(state => {
     const job = findJob(state, id);
     if (expectedFingerprint !== undefined && jobFingerprint(job) !== expectedFingerprint) return job;
     if (submissionOwner !== undefined && (job.status !== 'submitting' || job.submissionOwner !== submissionOwner)) return job;
-    if (job.status !== 'published') move(job, 'needs_reconciliation', 'YouTube outcome is uncertain. Reconcile the saved session/video; do not start another upload.');
+    move(job, 'needs_reconciliation', 'YouTube outcome is uncertain. Reconcile the saved session/video; the historical receipt is preserved and no new upload is authorized.');
     return job;
   });
 }
@@ -82,7 +91,7 @@ export async function uploadYouTubeJob(id: string, settingsInput: Settings, inpu
   if (await loadJournal(id)) throw new Error('A durable YouTube upload journal already exists. Reconcile it; this command never starts a second upload.');
   const bundle = await exportJob(id);
   await verifyCurrent(await readState(), bundle.job);
-  const files = bundle.variant.mediaPaths.filter(path => /\.mp4$/i.test(path));
+  const files = await Promise.all(bundle.variant.mediaPaths.filter(path => /\.mp4$/i.test(path)).map(resolveMediaLocation));
   if (files.length !== 1 || !files[0]) throw new Error('Attach exactly one reviewed MP4 to this YouTube variant.');
   const info = await stat(files[0]);
   if (!info.isFile() || info.size <= 32 || info.size > 512 * 1024 * 1024) throw new Error('The stage-one uploader supports a non-empty MP4 up to 512 MiB.');
@@ -90,7 +99,7 @@ export async function uploadYouTubeJob(id: string, settingsInput: Settings, inpu
   if (video.toString('ascii', 4, 8) !== 'ftyp') throw new Error('The approved media is not an MP4 container.');
   const mediaHash = createHash('sha256').update(video).digest('hex');
   const description = `${bundle.variant.text}\n\n${settings.descriptionDisclosure}\n\nSources:\n${bundle.draft.brief.sources.map(source => source.url).join('\n')}`;
-  if (!bundle.variant.title.trim() || [...bundle.variant.title].length > 100 || /[<>]/.test(bundle.variant.title) || Buffer.byteLength(description) > 5000 || bundle.variant.tags.join(',').length > 400) throw new Error('Reviewed YouTube metadata exceeds supported API limits; edit and approve the draft before uploading.');
+  if (!bundle.variant.title.trim() || [...bundle.variant.title].length > 100 || /[<>]/.test(bundle.variant.title) || /[<>]/.test(description) || Buffer.byteLength(description) > 5000 || bundle.variant.tags.join(',').length > 400) throw new Error('Reviewed YouTube metadata exceeds supported API limits; edit and approve the draft before uploading.');
   const io = await boundTransport(input);
   await verifyYouTubeChannel(io);
   const journal: Journal = { version: 1, jobId: id, channelId: expectedYouTubeChannelId, approvedHash: bundle.job.approvedHash, mediaHash, mediaBytes: video.length, metadata: { snippet: { title: bundle.variant.title, description, tags: bundle.variant.tags, categoryId: settings.categoryId, defaultLanguage: settings.defaultLanguage }, status: { privacyStatus: settings.privacyStatus, selfDeclaredMadeForKids: settings.selfDeclaredMadeForKids, containsSyntheticMedia: settings.containsSyntheticMedia } }, phase: 'starting', sessionUrl: null, videoId: null, at: now() };
@@ -128,7 +137,7 @@ export async function uploadYouTubeJob(id: string, settingsInput: Settings, inpu
 export async function reconcileYouTubeJob(id: string, input: Transport = {}): Promise<Job> {
   const journal = await loadJournal(id); if (!journal) throw new Error('No saved YouTube upload journal exists for this job.');
   const initial = findJob(await readState(), id);
-  if (!journalMatchesJob(initial, journal) || !['submitting', 'queued', 'needs_reconciliation', 'published'].includes(initial.status)) throw new Error('YouTube reconciliation does not match this job snapshot.');
+  if (!journalMatchesJob(initial, journal) || !['submitting', 'queued', 'needs_reconciliation', 'delivered', 'published'].includes(initial.status)) throw new Error('YouTube reconciliation does not match this job snapshot.');
   if (liveSubmissionOwner(initial)) throw new Error('The YouTube submission owner is still running; wait for it to finish before reconciliation.');
   const fingerprint = jobFingerprint(initial);
   const io = await boundTransport(input);
@@ -147,10 +156,11 @@ export async function reconcileYouTubeJob(id: string, input: Transport = {}): Pr
   return mutateState(state => {
     const job = findJob(state, id);
     if (jobFingerprint(job) !== fingerprint || !journalMatchesJob(job, journal)) return job;
-    job.providerPostId = video.id;
+    job.providerPostId = video.id; job.visibility = video.status.privacyStatus;
     if (['failed', 'rejected', 'deleted'].includes(video.status.uploadStatus) || video.processingDetails?.processingStatus === 'failed') { move(job, 'needs_reconciliation', 'YouTube reported a rejected/failed/deleted video; inspect the existing video before any new upload.'); return job; }
     if (video.status.privacyStatus === 'public' && video.status.uploadStatus === 'processed' && video.processingDetails?.processingStatus !== 'processing') { job.remoteId = video.id; job.remoteUrl = `https://www.youtube.com/watch?v=${video.id}`; move(job, 'published', 'Official YouTube API readback confirmed matching channel, processed upload and public privacy. Viewer playback and geographic restrictions need separate acceptance.'); }
-    else if (job.status === 'published' || (job.remoteId && job.remoteUrl)) move(job, 'needs_reconciliation', `Previously confirmed YouTube video now has API privacy ${video.status.privacyStatus} and upload status ${video.status.uploadStatus}; inspect its current visibility. The historical publication receipt is preserved.`);
+    else if (video.status.uploadStatus === 'processed' && video.processingDetails?.processingStatus !== 'processing' && video.status.privacyStatus !== 'public') { job.remoteId = video.id; job.remoteUrl = `https://www.youtube.com/watch?v=${video.id}`; move(job, 'delivered', `YouTube confirmed the video was processed with ${video.status.privacyStatus} visibility. It was uploaded successfully and is not publicly published.`); }
+    else if (job.status === 'published' || (job.status !== 'delivered' && job.remoteId && job.remoteUrl)) move(job, 'needs_reconciliation', `Previously confirmed YouTube video now has API privacy ${video.status.privacyStatus} and upload status ${video.status.uploadStatus}; inspect its current visibility. The historical publication receipt is preserved.`);
     else move(job, 'queued', `YouTube video exists; API privacy is ${video.status.privacyStatus} and upload status is ${video.status.uploadStatus}. Public publication is not yet confirmed.`);
     return job;
   });

@@ -109,3 +109,17 @@ test('refinement must target supplied content and independent video needs an exp
   assert.throws(() => videoScriptPromptInputSchema.parse({ explicitlyRequested: false, brief, platform: 'youtube', article: content.body, instruction: 'Prepare a script' }));
   assert.throws(() => buildVideoScriptPrompt({ explicitlyRequested: true, brief, platform: 'youtube', article: content.body, instruction: 'Prepare a script' }), /requested in the brief/);
 });
+
+
+test('Reddit local drafting keeps explicit profile selection separate from subreddit rules and delivery access', () => {
+  const guidance = platformGuidancePrompt(['reddit']);
+  assert.match(guidance, /subreddit draft requires an explicitly identified subreddit and supplied current rules/);
+  assert.match(guidance, /absent or unresolved subreddit rules make it uncertain/);
+  assert.match(guidance, /personal-profile draft requires the user to explicitly select their own personal profile/);
+  assert.match(guidance, /subreddit rules are not required for local drafting/);
+  assert.match(guidance, /Reddit个人主页/);
+  assert.match(guidance, /explicit destination choices, not a generic request/);
+  assert.match(guidance, /never invent a handle or claim permission/);
+  assert.match(guidance, /If neither destination is explicitly selected, assess the content as uncertain/);
+  assert.match(guidance, /Automated access needs the required registered\/approved App/);
+});

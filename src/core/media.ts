@@ -169,12 +169,12 @@ export function layoutMediaText(title: string, text: string, platform: Platform)
   return { titleLines, pages };
 }
 
-function renderCard(title: string[], body: string[], index: number, count: number, height: number): string {
+function renderCard(title: string[], body: string[], index: number, count: number, height: number, image?: string): string {
   const titleSize = 50;
   const video = height === 1920;
-  const bodySize = video ? 64 : 48;
-  const bodyStart = video ? 520 : 380;
-  const lineHeight = video ? 94 : 64;
+  const bodySize = image ? 52 : video ? 64 : 48;
+  const bodyStart = image ? 1020 : video ? 520 : 380;
+  const lineHeight = image ? 76 : video ? 94 : 64;
   const titleLines = title.map((line, lineIndex) => `<text x="84" y="${142 + lineIndex * 60}" font-size="${titleSize}" font-weight="700">${escapeXml(line)}</text>`).join('\n');
   const bodyLines = body.map((line, lineIndex) => `<text x="84" y="${bodyStart + lineIndex * lineHeight}" font-size="${bodySize}">${escapeXml(line)}</text>`).join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="${height}" viewBox="0 0 1080 ${height}">
@@ -183,6 +183,7 @@ function renderCard(title: string[], body: string[], index: number, count: numbe
 <rect x="84" y="80" width="82" height="8" rx="4" fill="#cc4935"/>
 <g font-family="Arial, PingFang SC, Noto Sans CJK SC, sans-serif" fill="#182d34" xml:space="preserve">
 ${titleLines}
+${image ? `<image href="${image}" x="84" y="390" width="912" height="560" preserveAspectRatio="xMidYMid meet"/>` : ''}
 ${bodyLines}
 <text x="84" y="${height - 86}" font-size="28" fill="#718089">${index + 1} / ${count}</text>
 </g>
@@ -207,9 +208,12 @@ async function findTool(name: string): Promise<string> {
   throw new Error(`Media export requires ${name}. ${instructions}`);
 }
 
-async function runTool(executable: string, args: readonly string[], cwd: string, timeoutMs = 120_000): Promise<string> {
+async function runTool(executable: string, args: readonly string[], cwd: string, timeoutMs = 120_000, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   return new Promise((resolveOutput, reject) => {
     const child = spawn(executable, args, { cwd, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    const abort = (): void => { child.kill('SIGKILL'); };
+    signal?.addEventListener('abort', abort, { once: true });
     let output = '';
     let errors = '';
     let timedOut = false;
@@ -220,11 +224,12 @@ async function runTool(executable: string, args: readonly string[], cwd: string,
     child.stdout.on('data', (data: Buffer) => { output = (output + data.toString()).slice(-32_768); });
     child.stderr.on('data', (data: Buffer) => { errors = (errors + data.toString()).slice(-32_768); });
     child.on('error', error => {
-      clearTimeout(timer);
+      clearTimeout(timer); signal?.removeEventListener('abort', abort);
       reject(new Error(`Could not run media tool: ${error.message}`));
     });
     child.on('close', code => {
-      clearTimeout(timer);
+      clearTimeout(timer); signal?.removeEventListener('abort', abort);
+      if (signal?.aborted) { reject(new Error('Video rendering cancelled.')); return; }
       if (timedOut) {
         reject(new Error('Media tool timed out. Check the local tool installation and shorten the draft before retrying.'));
         return;
@@ -243,7 +248,7 @@ async function requireFile(path: string): Promise<void> {
   if (!file.isFile() || file.size === 0) throw new Error('The media tool did not produce a usable output file.');
 }
 
-export async function buildMedia(draft: Draft, platform: Platform): Promise<MediaResult> {
+export async function buildMedia(draft: Draft, platform: Platform, options: { imagePaths?: string[]; signal?: AbortSignal } = {}): Promise<MediaResult> {
   if (!draft.approvedHash) throw new Error('Approve the current draft before generating media.');
   const variant = draft.variants.find(candidate => candidate.platform === platform);
   if (!variant) throw new Error(`This draft has no ${platformLabels[platform]} variant.`);
@@ -255,6 +260,12 @@ export async function buildMedia(draft: Draft, platform: Platform): Promise<Medi
   const height = kind === 'video' ? 1920 : 1440;
   const { titleLines, pages } = layoutMediaText(variant.title, variant.text, platform);
 
+  const referenceImages = await Promise.all((options.imagePaths ?? []).map(async path => {
+    const bytes = await readFile(path);
+    const mime = bytes[0] === 137 ? 'image/png' : bytes[0] === 255 ? 'image/jpeg' : 'image/webp';
+    return `data:${mime};base64,${bytes.toString('base64')}`;
+  }));
+  if (referenceImages.length && kind !== 'video') throw new Error('Reference-image composition is available for video projects.');
   const renderer = await findTool('rsvg-convert');
   const ffmpeg = kind === 'video' ? await findTool('ffmpeg') : null;
   const ffprobe = kind === 'video' ? await findTool('ffprobe') : null;
@@ -272,8 +283,8 @@ export async function buildMedia(draft: Draft, platform: Platform): Promise<Medi
       const base = `card-${String(index + 1).padStart(2, '0')}`;
       const svgPath = join(directory, `${base}.svg`);
       const pngPath = join(directory, `${base}.png`);
-      await writeFile(svgPath, renderCard(titleLines, page, index, pages.length, height), { encoding: 'utf8', mode: 0o600 });
-      await runTool(renderer, ['--width', '1080', '--height', String(height), '--output', pngPath, svgPath], directory);
+      await writeFile(svgPath, renderCard(titleLines, page, index, pages.length, height, referenceImages.length ? referenceImages[index % referenceImages.length] : undefined), { encoding: 'utf8', mode: 0o600 });
+      await runTool(renderer, ['--width', '1080', '--height', String(height), '--output', pngPath, svgPath], directory, 120_000, options.signal);
       await requireFile(pngPath);
       const header = await readFile(pngPath);
       if (!header.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('Card renderer did not return a PNG image.');
@@ -286,7 +297,7 @@ export async function buildMedia(draft: Draft, platform: Platform): Promise<Medi
     if (!ffmpeg || !ffprobe || !speech) throw new Error('Required video tools were not resolved.');
     const audioPath = join(directory, 'narration.aiff');
     const voice = process.env.STUDIO_TTS_VOICE ?? (/\p{Script=Han}/u.test(narration) ? 'Tingting' : 'Samantha');
-    await runTool(speech, ['-v', voice, '-r', '170', '-f', join(directory, 'narration.txt'), '-o', audioPath], directory);
+    await runTool(speech, ['-v', voice, '-r', '170', '-f', join(directory, 'narration.txt'), '-o', audioPath], directory, 120_000, options.signal);
     await requireFile(audioPath);
     const duration = Number((await runTool(ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioPath], directory)).trim());
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('Could not measure the generated narration audio.');
@@ -297,9 +308,9 @@ export async function buildMedia(draft: Draft, platform: Platform): Promise<Medi
     const slides = ['ffconcat version 1.0', ...weights.flatMap((weight, index) => [`file card-${String(index + 1).padStart(2, '0')}.png`, `duration ${(duration * weight / totalWeight).toFixed(6)}`]), `file card-${String(pages.length).padStart(2, '0')}.png`, ''].join('\n');
     await writeFile(join(directory, 'slides.ffconcat'), slides, { encoding: 'utf8', mode: 0o600 });
     const videoPath = join(directory, 'video.mp4');
-    await runTool(ffmpeg, ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '1', '-i', 'slides.ffconcat', '-i', 'narration.aiff', '-map', '0:v:0', '-map', '1:a:0', '-vf', 'fps=24,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-t', duration.toFixed(6), 'video.mp4'], directory);
+    await runTool(ffmpeg, ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '1', '-i', 'slides.ffconcat', '-i', 'narration.aiff', '-map', '0:v:0', '-map', '1:a:0', '-vf', 'fps=24,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-t', duration.toFixed(6), 'video.mp4'], directory, 120_000, options.signal);
     await requireFile(videoPath);
-    const probeOutput = await runTool(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'json', videoPath], directory);
+    const probeOutput = await runTool(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'json', videoPath], directory, 120_000, options.signal);
     const probeSchema = z.object({ streams: z.array(z.object({ codec_type: z.string() })) });
     const streams = probeSchema.parse(JSON.parse(probeOutput) as unknown).streams.map(stream => stream.codec_type);
     if (!streams.includes('video') || !streams.includes('audio')) throw new Error(`The generated MP4 is missing its video or narration track (found: ${streams.join(', ') || 'none'}).`);
