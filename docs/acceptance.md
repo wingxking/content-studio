@@ -54,7 +54,7 @@ See [replacement run](ai-agent-education-run-2026-10-10.zh-CN.md). Historical ch
 
 - [ ] Complete account setup and authorized publication tests for Xiaohongshu, Reddit, X, WeChat, TikTok, Bilibili, YouTube, Kuaishou and other selected channels.
 - [x] Exercise official YouTube API submission/reconciliation for two distinct approved videos and reversible withdrawal of the old one; Postiz remains unconfigured.
-- [ ] Validate a dedicated Supabase project if cloud database persistence is selected.
+- [ ] Validate a dedicated local Supabase CLI stack, relational migrations, private Storage and durable local jobs. Hosted Supabase deployment remains stage two.
 - [ ] Evaluate maintained China publishers against actual accounts before adding their adapters; pin reviewed versions.
 - [ ] Run repeated original-content cycles and record actual performance/cost.
 - [x] Implement official regional RSS discovery and verify a real four-country collection.
@@ -79,7 +79,13 @@ The actual Codex draft has four platform variants, four Xiaohongshu PNGs and a 4
 
 ## Planned Web workflow acceptance
 
-The following user-requested capabilities are design requirements, not completed functionality. See [Web design](web-product-design.zh-CN.md) for scoped local milestones.
+The following user-requested capabilities are design requirements, not completed functionality. See [Web design](web-product-design.zh-CN.md) and the newer [local-first build review](local-first-build-review.zh-CN.md) for L0-L5 milestones. Complete local application functionality and each channel's permission/live-delivery acceptance must be reported separately; the initial channel set is not silently narrowed.
+
+- [ ] Start local Supabase DB/Auth/Storage/pgmq/pg_cron without a hosted project; verify actual service health and loopback-only listening.
+- [ ] Provide verified local setup/start/stop/status/upgrade and backup/restore operations; browser closure does not stop work, and sleep/restart follows the documented missed-run policy.
+- [ ] Keep real local data and resettable test instances separate; replay migrations only against an explicitly disposable test target.
+- [ ] Restore database plus actual media bytes into an isolated instance; check hashes, references and receipts, keep publishing paused, and reconcile unknown external submissions.
+- [ ] Represent known private/unlisted/deleted visibility separately from unknown submission outcomes and preserve historical publication evidence.
 
 - [ ] Create, edit, pause and run discovery schedules with a prompt, selected assets, explicit time/timezone, missed-run policy and durable run history.
 - [ ] View 0–20 sourced, deduplicated hot questions for each run and select a question for fine-grained creation.

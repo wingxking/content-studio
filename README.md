@@ -36,7 +36,7 @@ The native route prepares content and records publication evidence. Review each 
 
 ## Planned Web workflow upgrade
 
-The new design covers promptable discovery schedules, up to 20 sourced questions per run, a versioned master with independently editable platform adaptations, Web AI instructions with safe merges, a reusable asset library, explicitly created video drafts, and historical publishing snapshots. These new workflow features are planned, not implemented. The local Web Research & setup page links to all three documents:
+The new design covers promptable discovery schedules, up to 20 sourced questions per run, a versioned master with independently editable platform adaptations, Web AI instructions with safe merges, a reusable asset library, explicitly created video drafts, and historical publishing snapshots. These new workflow features are planned, not implemented. The latest [local-first build review](docs/local-first-build-review.zh-CN.md) fixes the baseline as a complete local Supabase stack and defines L0-L5 acceptance, backup/recovery, and future cloud migration. Cloud work remains research only. These are construction requirements, not a claim that the local stack has been installed. The local Web Research & setup page links to the three supporting documents:
 
 - [Web product design and phased acceptance](docs/web-product-design.zh-CN.md)
 - [Local and production technical architecture](docs/web-technical-architecture.zh-CN.md)

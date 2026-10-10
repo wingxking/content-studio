@@ -1,6 +1,8 @@
 # Content Studio
 
 - Stage one runs locally on one Mac with Codex. Stage two must remain gated until stage-one acceptance is complete.
+- The complete local upgrade uses Supabase CLI with the existing Docker-compatible runtime for local database, Auth, Storage, Cron and Queues. Hosted Supabase is not its default backend; preserve current workspace artifacts until a verified migration.
+- Cloud work is feasibility and architecture research only until the local gate passes. Follow docs/local-first-build-review.zh-CN.md for the latest scope, migration boundaries and L0-L5 acceptance. Keep resettable local test instances separate from real local content.
 - Use Chrome profile `radarxai@gmail.com` for Google, Supabase, and test-platform account operations. Verify the profile in Chrome before sign-in; never use another account silently.
 - Use Supabase whenever a database is required. Do not add SQLite, MongoDB, or a separate PostgreSQL deployment.
 - Keep strict TypeScript, no `any`, named exports, and small scoped changes.

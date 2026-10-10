@@ -1,6 +1,6 @@
 # Content Studio：本地与生产技术架构（2026-10-10）
 
-这是根据现有代码和当前官方文档形成的设计建议，尚未部署或实现。对应 [Web 功能方案](web-product-design.zh-CN.md) 与 [产品调研](research-web-workflows-2026-10-10.zh-CN.md)。不存在适用于所有团队、平台和预算的“全球唯一最佳技术栈”；本项目的首选应是：保持同一个内容领域模型与 Web 操作流程，本地使用受限 Codex Worker，生产替换为模型 API Worker；应用数据库始终使用 Supabase。
+这是根据现有代码和当前官方文档形成的设计建议，尚未部署或实现。最新阶段边界和实施顺序以 [本地优先建设复审](local-first-build-review.zh-CN.md) 为准：第一阶段应用、数据库、素材和后台任务全部在 Mac；云端仅研究方案。对应 [Web 功能方案](web-product-design.zh-CN.md) 与 [产品调研](research-web-workflows-2026-10-10.zh-CN.md)。不存在适用于所有团队、平台和预算的“全球唯一最佳技术栈”；本项目的首选应是：保持同一个内容领域模型与 Web 操作流程，本地使用受限 Codex Worker，生产替换为模型 API Worker；应用数据库始终使用 Supabase。
 
 ## 1. 已核查的基础与需要改变的部分
 
@@ -34,7 +34,7 @@ flowchart LR
   EV --> UI
 ```
 
-业务状态以 Supabase 为准，队列里只放 `jobId`、任务类型、必要追踪字段，不放全文、原始图像或凭据。初期可使用一个 Node Worker 进程执行不同任务，按任务类型限制并发；不是一开始部署四套微服务。视频 CPU 作业后续独立扩容，发布按目标账号串行。
+图中 Supabase Postgres/Storage/Cron/Queues 在第一阶段均为 Supabase CLI + Docker 的本机服务；Model API 节点仅为后续替换方案。业务状态以 Supabase 为准，队列里只放 `jobId`、任务类型、必要追踪字段，不放全文、原始图像或凭据。初期可使用一个 Node Worker 进程执行不同任务，按任务类型限制并发；不是一开始部署四套微服务。视频 CPU 作业后续独立扩容，发布按目标账号串行。
 
 Web API 收到长任务后返回 `202 + jobId`；页面刷新、断网或关闭浏览器不会丢任务。UI 通过 SSE 订阅有限的业务事件与进度，重连使用事件序号继续读取；原始 Codex stderr、内部工具执行日志和凭据不得显示给用户。生产也可用 Supabase Realtime 广播权限受控的状态事件，但 Realtime 是通知通道，持久业务记录仍从数据库读取。
 
@@ -42,7 +42,9 @@ Web API 收到长任务后返回 `202 + jobId`；页面刷新、断网或关闭�
 
 推荐保留 React/Vite + Express + TypeScript/Zod，不为上线预案重写前端。增加本地任务 Worker 和独立运行的 scheduler 组件；`launchd` 负责启动/重启进程，Web 页显示 Worker 是否在线、最后心跳与下次执行时间。Apple 官方资料将 `launchd` 作为后台程序管理机制，采用它避免依赖浏览器保持打开；Mac 睡眠与断网仍必须由产品记录为错过执行，不能承诺持续在线。
 
-如需要数据库，选择已有指定 Supabase 的开发项目，迁移为关系表；本地单人 Auth 可以暂时采用同源本地会话，数据访问走本地服务，不能把数据库 secret key 交给浏览器。上传素材可先放本机私有目录，通过统一 Storage Adapter 操作，随后转 Supabase Storage；如果第一阶段已经启用云素材库，使用 Supabase Storage 也不等于已经开始 SaaS 上线。
+第一阶段使用 Supabase CLI + 已有 Docker-compatible runtime 在本机运行 Postgres/Auth/Storage，并验证 pgmq/pg_cron；不默认连接托管开发项目。应用采用本地 owner/workspace，数据访问走本地服务，不能把数据库 secret key 交给浏览器。新素材库直接使用本地私有 Supabase Storage，通过 assetId 和对象键访问；已有本机文件保留为迁移输入。云端将来复用相同 SQL 与素材契约。[官方本地开发](https://supabase.com/docs/guides/local-development)
+
+本地 project_id、端口和卷与可重置测试实例分开。安装/启停/健康/备份恢复都属于本地验收；pg_cron 是唯一到期调度入口，launchd 只守护 API/Worker。数据库备份与素材对象备份分开验证，恢复默认暂停发布。当前仓库还没有这套本地服务配置；不能把 CLI 已安装算作服务运行通过。
 
 Codex 使用现有 `exec` 作为可靠起点，增加 `--json` 后仅转换允许的进度事件；结构化结果持久化后再应用到稿件。图片由本地服务解析 assetId、确认归属，复制选定原图或生成限尺寸副本到任务临时目录，采用本机 CLI 实际支持的图像输入参数，须通过版本能力检测与一次真实图片理解测试。不要把任意用户 URL 或任意路径直接传给 Codex。
 
@@ -88,7 +90,7 @@ Supabase Queues 基于 pgmq，官方的 exactly-once 表述仅限消息 visibili
 
 选题、原稿调优、单平台微调和视频分镜都复用同一个素材选择器。用户清楚看到“本次模型将看到 3 张图”以及“仅作为最终配图的 2 张图”，而不是所有被选图片都偷偷送入模型。视觉模型输出只是描述，不能将图片中的不确定事实当成新闻核查结果。
 
-生产素材使用私有 Supabase Storage bucket，workspace 归属在数据库和 storage.objects RLS 中均验证。浏览器用已授权路径的短期上传权限直接传储存，服务器不为每一张图片中转全部 bytes。超过 6 MB 或网络不稳定时按官方建议采用 TUS/Uppy 断点续传；上传完成再校验类型/尺寸/hash，登记 usable 资产。短期签名下载 URL 用于预览或 provider 读取，不能当作永久资产标识，注意有效期必须覆盖预计 provider 读取窗口。
+完整本地版本和未来生产版本都使用各自环境的私有 Supabase Storage bucket，workspace 归属在数据库和 storage.objects RLS 中均验证。浏览器用已授权路径的短期上传权限直接传储存，服务器不为每一张图片中转全部 bytes。超过 6 MB 或网络不稳定时按官方建议采用 TUS/Uppy 断点续传；上传完成再校验类型/尺寸/hash，登记 usable 资产。短期签名下载 URL 用于预览或 provider 读取，不能当作永久资产标识，注意有效期必须覆盖预计 provider 读取窗口。
 
 引用：[Supabase Storage 访问控制](https://supabase.com/docs/guides/storage/security/access-control)、[TUS 断点续传](https://supabase.com/docs/guides/storage/uploads/resumable-uploads)、[私有文件与签名 URL](https://supabase.com/docs/guides/storage/serving/downloads)。
 
@@ -179,7 +181,7 @@ flowchart TB
 
 ### 本地状态和迁移边界
 
-当前 JSON 模式仍可用于迁移演练和单机轻量运行。新增历史/任务查询需要数据库时，本地版也使用 Supabase 的个人开发工作区；“本地版”指计算由 Mac/Codex 执行，不等于使用云数据库时完全离线。第一阶段个人数据模型不意味着已经交付 SaaS，多租户 Auth/RLS/组织协作仍在第二阶段验收。
+当前 JSON 模式保留为旧数据与迁移输入。完整本地版本将历史/任务/素材放入本机 Supabase 关系表和 Storage，数据库不以云项目为默认依赖；Codex 推理、来源获取和平台 API 仍联网。第一阶段建设单 owner/workspace 的数据归属和访问限制；多租户 Auth/RLS/组织协作仍在第二阶段验收。使用同一 migration 序列从本地测试向未来 staging/production 晋级，真实内容与凭据不进入测试 seed；首次业务数据迁移、Storage bytes 搬迁和 OAuth 重新授权分别执行。
 
 迁移为新增 schema version：备份旧状态；为每份 Draft 建 ContentItem、首个 MasterRevision 和各个 ChannelRevision；既有平台稿缺少原始生成基线时标记基线未知，第一次同步先生成建议，不假设它从未被微调；文件计算 hash并注册Asset；已有 Job 保留原 snapshot/hash/远端证据。先 dry-run 和校验引用数，再显式迁移，支持失败回滚。不要把旧视频旁白静默变成新视频任务；可导入为已有脚本并标出来源。
 
@@ -205,7 +207,7 @@ AI模型只返回候选业务数据；领域服务执行校验、保存和版本
 
 ## 13. 可直接落地的生产拓扑与替代条件
 
-在“小团队、全球用户、需要持续运行 Node/FFmpeg、已有 Vite/Express”的条件下，优先 **Render Web Service + Background Worker + Supabase**。最小部署让 Express 同域服务 Vite 静态产物和 API，省去两域 Auth/CORS/SSE排障；Worker轮询 Supabase Queue，不必增加 Render Key Value/Redis。Render 官方说明 Background Worker 持续运行，可处理媒体与第三方 AI 调用；Web Service 支持 Express 与 Docker。[Render Worker](https://render.com/docs/background-workers)、[Web Service](https://render.com/docs/web-services)
+本节仅为云端可行性方案；第一阶段验收前不创建资源或部署。在“小团队、全球用户、需要持续运行 Node/FFmpeg、已有 Vite/Express”的条件下，推荐候选为 **Render Web Service + Background Worker + Supabase**，最终规格、地区和费用由本地实测决定。最小部署让 Express 同域服务 Vite 静态产物和 API，省去两域 Auth/CORS/SSE排障；Worker轮询 Supabase Queue，不必增加 Render Key Value/Redis。Render 官方说明 Background Worker 持续运行，可处理媒体与第三方 AI 调用；Web Service 支持 Express 与 Docker。[Render Worker](https://render.com/docs/background-workers)、[Web Service](https://render.com/docs/web-services)
 
 流量变大时可把静态前端拆到 Cloudflare Pages/CDN，同时保持 API/Worker 与 Supabase 同地区。Cloudflare 有框架部署指导，但不把浏览器端 Vite构建误当作长任务 runtime。[Cloudflare Pages](https://developers.cloudflare.com/pages/framework-guides/)
 
