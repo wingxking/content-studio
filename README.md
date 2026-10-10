@@ -41,6 +41,7 @@ The new design covers promptable discovery schedules, up to 20 sourced questions
 - [Web product design and phased acceptance](docs/web-product-design.zh-CN.md)
 - [Local and production technical architecture](docs/web-technical-architecture.zh-CN.md)
 - [Current official product research](docs/research-web-workflows-2026-10-10.zh-CN.md)
+- [Runnable GitHub products and limited local trials](docs/research-github-runnable-2026-10-10.zh-CN.md)
 
 ## Production workflow
 
