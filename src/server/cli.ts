@@ -7,6 +7,8 @@ import { generateContent } from '../core/generator.ts';
 import { readState } from '../core/store.ts';
 import { addAccount, approveDraft, cancelJob, confirmPublication, createDraft, exportJob, pausePublishing, reconcileJob, recordMetrics, replaceDraft, runDueJobs, scheduleJob, updateAccount, verifyDraftApproval } from '../core/pipeline.ts';
 import { buildMedia } from '../core/media.ts';
+import { discoverTrends, discoveryCountrySchema } from '../core/discovery.ts';
+import { saveDiscoverySnapshot } from '../core/discoverySnapshot.ts';
 
 const loadJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
 const required = (value: string | undefined, name: string): string => { if (!value) throw new Error(`Missing ${name}`); return value; };
@@ -16,6 +18,15 @@ try {
   switch (command) {
     case 'doctor': result = await doctor(); break;
     case 'status': result = await readState(); break;
+    case 'discover': {
+      const countries = first ? first.split(',').map(value => discoveryCountrySchema.parse(value)) : undefined;
+      const freshnessHours = z.union([z.literal(4), z.literal(24), z.literal(48), z.literal(168)]).parse(second ? Number(second) : 24);
+      const snapshot = await discoverTrends({ ...(countries ? { countries } : {}), freshnessHours });
+      const path = await saveDiscoverySnapshot(snapshot);
+      result = { path, requestedCountries: snapshot.requestedCountries, successfulCountries: snapshot.successfulCountries, failedCountries: snapshot.failedCountries, candidates: snapshot.candidates.length, nextAction: 'Review regional trend candidates and independently verify news facts before creating a content brief.' };
+      if (snapshot.successfulCountries.length === 0) process.exitCode = 1;
+      break;
+    }
     case 'generate': {
       const brief = briefSchema.parse(await loadJson(required(first, 'brief JSON file')));
       result = await createDraft(brief, await generateContent(brief)); break;
@@ -53,7 +64,7 @@ try {
       await writeFile(resolve(folder, 'post.md'), `# ${bundle.variant.title}\n\n${bundle.variant.text}\n\n${bundle.variant.tags.map(tag => `#${tag}`).join(' ')}\n\nOpen: ${bundle.nativeUrl}\n\nMedia:\n${bundle.variant.mediaPaths.join('\n')}\n`);
       result = { folder, status: bundle.job.status, nextAction: 'Use Chrome profile radarxai@gmail.com and record the verified platform ID and URL.' }; break;
     }
-    default: result = { usage: ['doctor', 'status', 'generate <brief.json>', 'import <content.json>', 'approve <draft-id>', 'account <account.json>', 'media <draft-id> <platform>', 'schedule <schedule.json>', 'run', 'pause', 'resume', 'export <job-id> <folder>', 'receipt <job-id> <url> <remote-id>', 'reconcile <job-id>', 'metrics <job-id> <metrics.json>', 'cancel <job-id>'] };
+    default: result = { usage: ['doctor', 'status', 'discover [US,IN,GB,ZA] [4|24|48|168]', 'generate <brief.json>', 'import <content.json>', 'approve <draft-id>', 'account <account.json>', 'media <draft-id> <platform>', 'schedule <schedule.json>', 'run', 'pause', 'resume', 'export <job-id> <folder>', 'receipt <job-id> <url> <remote-id>', 'reconcile <job-id>', 'metrics <job-id> <metrics.json>', 'cancel <job-id>'] };
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } catch (error) {

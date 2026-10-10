@@ -5,6 +5,10 @@
     "brief": {
       "type": "object",
       "properties": {
+        "topicOrigin": {
+          "type": "string",
+          "enum": ["editorial", "trend"]
+        },
         "topic": {
           "type": "string",
           "minLength": 3,

@@ -6,7 +6,7 @@ export type Platform = z.infer<typeof platformSchema>;
 export const sourceSchema = z.object({ title: z.string().min(1).max(300), url: z.url().refine(url => /^https?:\/\//.test(url), 'Use an HTTP(S) URL'), excerpt: z.string().min(1).max(12000) });
 export const variantSchema = z.object({ platform: platformSchema, title: z.string().min(1).max(300), text: z.string().min(1).max(60000), tags: z.array(z.string().max(80)).max(30), mediaPaths: z.array(z.string().min(1)).max(20) });
 export const generatedSchema = z.object({ title: z.string().min(1).max(300), body: z.string().min(1).max(80000), variants: z.array(variantSchema).min(1).max(12) });
-export const briefSchema = z.object({ topic: z.string().min(3).max(1000), audience: z.string().min(3).max(1000), angle: z.string().min(3).max(4000), sources: z.array(sourceSchema).min(1).max(20), platforms: z.array(platformSchema).min(1).max(12) });
+export const briefSchema = z.object({ topicOrigin: z.enum(['editorial', 'trend']).optional(), topic: z.string().min(3).max(1000), audience: z.string().min(3).max(1000), angle: z.string().min(3).max(4000), sources: z.array(sourceSchema).min(1).max(20), platforms: z.array(platformSchema).min(1).max(12) });
 export type Brief = z.infer<typeof briefSchema>;
 export type Generated = z.infer<typeof generatedSchema>;
 export type Variant = z.infer<typeof variantSchema>;

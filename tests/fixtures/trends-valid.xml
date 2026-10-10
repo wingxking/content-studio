@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:ht="https://trends.google.com/trending/rss" version="2.0">
+  <channel>
+    <title>Daily Search Trends</title>
+    <item>
+      <title>Nobel Peace Prize</title>
+      <pubDate>Sat, 10 Oct 2026 03:50:00 GMT</pubDate>
+      <ht:approx_traffic>20K+</ht:approx_traffic>
+      <ht:news_item><ht:news_item_title>A reference, not a verified fact</ht:news_item_title><ht:news_item_url>https://example.com/news/one#section</ht:news_item_url><ht:news_item_source>Fixture News</ht:news_item_source></ht:news_item>
+      <ht:news_item><ht:news_item_title>Duplicate reference</ht:news_item_title><ht:news_item_url>https://example.com/news/one</ht:news_item_url><ht:news_item_source>Fixture News</ht:news_item_source></ht:news_item>
+    </item>
+    <item>
+      <title>Local sports result</title>
+      <pubDate>Sat, 10 Oct 2026 03:00:00 GMT</pubDate>
+      <ht:approx_traffic>5000000+</ht:approx_traffic>
+      <ht:news_item><ht:news_item_title>Sports reference</ht:news_item_title><ht:news_item_url>https://example.com/news/sports</ht:news_item_url><ht:news_item_source>Fixture Sports</ht:news_item_source></ht:news_item>
+    </item>
+  </channel>
+</rss>

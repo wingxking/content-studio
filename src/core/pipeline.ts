@@ -6,6 +6,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { accountSchema, briefSchema, generatedSchema, metricsInputSchema, nativeUrls, type Account, type Brief, type Draft, type Generated, type Job, type Platform, type StudioState, type Variant } from './model.ts';
 import { dataDirectory, mutateState, readState } from './store.ts';
+import { assertAutomatedPublishingAllowed } from './publishing-policy.ts';
 import { canonicalPostizContent, listRemotePosts, RejectedPublishError, submitPostiz, validatePostizVariant, verifyIntegration, type Integration } from './postiz.ts';
 
 const owner = `${hostname()}:${process.pid}:${randomUUID()}`;
@@ -85,6 +86,7 @@ export async function verifyDraftApproval(draft: Draft): Promise<void> {
   if (!draft.approvedHash || draft.approvedHash !== await draftHash(draft)) throw new Error('Draft content or media changed after approval. Review and approve it again.');
 }
 async function verifyApproval(draft: Draft, variant: Variant, account: Account, job?: Job): Promise<void> {
+  assertAutomatedPublishingAllowed(draft, account);
   await verifyDraftApproval(draft);
   if (job && job.approvedHash !== targetHash(draft, variant, account)) throw new Error('Approved content revision or account target changed. Cancel this job and schedule the reviewed revision.');
 }
