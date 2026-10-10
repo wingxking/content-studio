@@ -17,7 +17,7 @@ flowchart LR
   G --> H[Account-specific delivery queue]
   H --> P[Platform policy and target checks]
   P --> I[Postiz text adapter - currently unconfigured]
-  P --> Y[Explicit YouTube official API CLI - OAuth pending]
+  P --> Y[Explicit YouTube official API CLI - authorized]
   P --> J[Native package and genuine human handoff]
   I -. Manual reconciliation .-> K[Provider status or attested platform URL]
   J -. Separate creator-page operation and receipt .-> K
@@ -26,7 +26,7 @@ flowchart LR
   H --> S[Local artifacts or Supabase state]
 ```
 
-Regional trend and related news-reference discovery are implemented through the `discover` CLI. Independent article verification/excerpt collection, competitor analysis and analytics ingestion are not automated. RSS observation dates are not article dates, the traffic window is not inferred, country bucket counts are never summed, and lexical country-coverage ranking is not a global popularity score. The native path exports a package and waits for an operator; it does not execute a browser publisher. Postiz is unconfigured and no platform has passed live publication acceptance.
+Regional trend and related news-reference discovery are implemented through the `discover` CLI. Independent article verification/excerpt collection, competitor analysis and analytics ingestion are not automated. RSS observation dates are not article dates, the traffic window is not inferred, country bucket counts are never summed, and lexical country-coverage ranking is not a global popularity score. The native path exports a package and waits for an operator; it does not execute a browser publisher. Postiz remains unconfigured. Two distinct YouTube videos were submitted once each; the previous video was withdrawn to Private, while the new education video has official public/processed readback and intended-channel listing. Historical signed-in playback reached the old video’s end; the new player reached 36/46 seconds; repeated delivery, renewal, restart and the other selected channels remain unaccepted.
 
 The small custom coordinator owns evidence, revision approval, account selection, job state and result reconciliation. Maintained upstream components own model execution, media rendering, and API-based delivery. React, Vite, Express and Zod provide the workbench and validated interface. Postiz is called through its documented public API; its AGPL source is not embedded into this product. Broader adapters are deferred until their actual accounts and contracts are verified.
 
@@ -53,9 +53,9 @@ Manual publication receipts record operator-attested evidence. Domain validation
 
 ## Platform policy boundaries
 
-The centralized X policy guard rejects explicit trend-origin briefs and legacy Google Trends provenance on automated Postiz X jobs, at scheduling and each dispatch preflight. Its narrow provenance check is not a complete classifier: the operator must accurately retain source provenance. Native handoff is a genuine human action, not permission for agent-driven X website automation. Reddit's approved App requirement and Xiaohongshu account/topic eligibility remain explicit account blockers. The current four observed accounts are registered as Blocked until their permitted publishing route is available.
+The centralized X policy guard rejects explicit trend-origin briefs and legacy Google Trends provenance on automated Postiz X jobs, at scheduling and each dispatch preflight. Its narrow provenance check is not a complete classifier: the operator must accurately retain source provenance. Native handoff is a genuine human action, not permission for agent-driven X website automation. Reddit's approved App requirement and Xiaohongshu account/topic eligibility remain explicit account blockers. YouTube is Connected after the official grant and exact channel readback; the other three observed accounts remain Blocked and unsubmitted.
 
-Google Cloud first-use setup is now complete and project radar-511204 is available. The user approved the observed YouTube API Terms/Enable action, and the actual Cloud notification confirms successful activation. OAuth overview and Clients table show no configured clients. The client creation entry is open; Computer Use reports the Mac is locked, so manual unlock is needed before Desktop OAuth setup/grant. No paid trial, real OAuth grant, upload or public video exists. See [account tasks](accounts.md) and [policy evidence](platform-policies-v2.zh-CN.md).
+Google Cloud project radar-511204 has YouTube Data API enabled, a dedicated Desktop AI-agent client and the specified External Testing user. The exact upload/read-only grant verifies UCVUtH6reLkEuMrUuTh-XgjQ. Original job 489d1309-02d4-47e8-9d0b-3a9fba52b864 submitted revision 7 once; its video aKaJ3qBAhCc is now confirmed Private after Studio Save and API readback. New job 78fb0a72-f850-4bd3-a48b-0f9629e4e264 submitted independent education revision 4 once; [X8dDltMseM4](https://www.youtube.com/watch?v=X8dDltMseM4) is public/processed and listed Public/Published, with signed-in progress to 36/46 seconds. Existing scopes cannot call videos.update (actual 403); privacy was changed in the owner-authorized native Studio workflow without a broader grant. The schema preserves the old receipt as needs_reconciliation rather than inventing a withdrawn status. Credentials and per-job journals remain private, files 0600/directories 0700. No paid trial was started. See [replacement evidence](ai-agent-education-run-2026-10-10.zh-CN.md).
 
 ## Stage-two gate and intended migration
 

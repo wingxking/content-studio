@@ -2,7 +2,7 @@
 
 A local content production workbench for one Mac and Codex. Generate sourced articles and platform versions, review them, make image cards or narrated videos, then track deliveries and measured performance.
 
-The local generation, review, media, and delivery-coordination foundation is implemented. Official regional trend RSS collection and an explicit official YouTube API uploader are implemented. Independent factual research and live multi-platform publication acceptance remain unfinished. Stage one has not passed acceptance; stage two has not started. See [current progress and architecture in Chinese](docs/progress-and-architecture.zh-CN.md).
+The local generation, review, media, and delivery-coordination foundation is implemented. Official regional trend RSS collection and an explicit official YouTube API uploader are implemented. Two reviewed videos were submitted once each through official YouTube OAuth/API. The first was subsequently withdrawn to Private at the owner’s request; the replacement AI-agent education video is public/processed and listed on the correct channel. Independent factual research and broader multi-platform acceptance remain unfinished. Stage one has not passed overall acceptance; stage two has not started. See [current progress and architecture in Chinese](docs/progress-and-architecture.zh-CN.md).
 
 ## Run
 
@@ -24,7 +24,7 @@ Use your existing local Codex authentication. The app detects the official deskt
 - PNG card rendering with librsvg; actual narrated MP4 rendering with FFmpeg and macOS speech.
 - Account metadata for 12 channels, target-specific scheduling, durable state, pause, duplicate prevention, and crash recovery.
 - Documented Postiz API adapter for **X and LinkedIn text** when authorized integrations and an API key are configured.
-- Official YouTube Desktop OAuth, channel verification, resumable upload journal and API status readback through explicit CLI commands; real authorization/upload still pending.
+- Official YouTube Desktop OAuth, channel verification, resumable upload journal and API status readback through explicit CLI commands; two real submissions on the verified RadarXAI channel; the old topic is now Private and the new education video is public.
 - Native packages for other channels, with genuine human handoff where automation is prohibited and checked post-ID/URL receipts.
 - X trend-derived content is blocked from automatic Postiz delivery at scheduling and final dispatch.
 - Manually entered performance snapshots from measured account analytics.
@@ -32,7 +32,7 @@ Use your existing local Codex authentication. The app detects the official deskt
 
 `discover` automatically collects regional RSS candidates and related news URLs, preserving the observation time, feed date and separate traffic buckets. It never claims a global number-one trend or converts RSS headlines into verified facts. A researcher must independently verify the event and enter source excerpts before generation; the generator does not browse. Competitor analysis and automatic analytics remain unfinished.
 
-The native route prepares content and records publication evidence. Review each platform's authorization and content eligibility before any creator-page operation. X trend posts require genuine human publication; Reddit agent access requires an approved App. Do not use Codex clicks or headless browsers to bypass those requirements. The explicit YouTube CLI uses authorized Data API OAuth, not Chrome cookies; its background queue does not automatically invoke uploads. API public-status readback still needs viewer playback acceptance. No live post has yet been submitted for this user's accounts.
+The native route prepares content and records publication evidence. Review each platform's authorization and content eligibility before any creator-page operation. X trend posts require genuine human publication; Reddit agent access requires an approved App. Do not use Codex clicks or headless browsers to bypass those requirements. The explicit YouTube CLI uses authorized Data API OAuth, not Chrome cookies; its background queue does not automatically invoke uploads. The current [AI-agent education video](https://www.youtube.com/watch?v=X8dDltMseM4) is confirmed public/processed by the API and Public/Published in the intended Studio Shorts list. Its signed-in player reached 36/46 seconds; full playback and subjective quality acceptance remain separate. The former video aKaJ3qBAhCc is confirmed Private after Studio Save and official API readback. X, Reddit and Xiaohongshu remain unsubmitted; see the [replacement publication record](docs/ai-agent-education-run-2026-10-10.zh-CN.md).
 
 ## Planned Web workflow upgrade
 

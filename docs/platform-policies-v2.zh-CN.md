@@ -6,14 +6,14 @@
 
 可靠产品应优先采用平台批准的 API 与 OAuth，明确记录用户的发布授权，并以平台回执和公开可访问的作品链接完成验收。无头浏览器和 Codex 可见电脑操作都是自动化技术；窗口是否可见、是否模拟鼠标点击，并不会自动获得平台许可，也不能保证不会封号。
 
-本次请求中的 X 自动追热点存在明确政策冲突：官方自动化规则禁止自动发布趋势话题，也禁止非 API 自动化，例如脚本操作 X 网站。应生成候选文稿，由真实用户决定是否手动发布；不能把“Codex 像人点击”当作该限制的替代路线。[X Automation Rules](https://help.x.com/en/rules-and-policies/x-automation)
+历史自动追热点请求中的诺贝尔和平奖草稿存在 X 政策冲突：官方规则禁止自动发布趋势话题。用户现已将选题替换为编辑选定的 AI Agent 教育与实践内容；符合其他规则的原创信息类顶层 Post 可以经授权 API 发布，但当前项目尚未接通并验收 X / Postiz 发布集成。非 API 网站自动化仍被禁止，没有可见 Codex 操作的例外。[X Automation Rules](https://help.x.com/en/rules-and-policies/x-automation)
 
 | 平台 | 产品化发布首选 | 本次账号已登录还缺什么 | 可见浏览器 / 无头浏览器判断 |
 | --- | --- | --- | --- |
-| YouTube | YouTube Data API，OAuth 用户授权，真实视频上传 | Cloud 应用、启用 API、上传 scope、频道、明确内容与可见性选择 | 官方条款限制未经许可的自动化访问；官方 API 更适合持续产品运行 |
-| X | 获批应用和用户 OAuth 的 `POST /2/tweets`，只发布政策允许的内容 | Developer App、写权限、计费额度；热点自动发仍禁止 | 非 API 网站自动化被明确禁止；可见 Codex 操作不应成为规避路线 |
+| YouTube | YouTube Data API，OAuth 用户授权，真实视频上传 | 当前上传 / 读取授权不包含修改可见性或删除；作品处理与最终可见性仍需验收 | 官方条款限制未经许可的自动化访问；官方 API 更适合持续产品运行 |
+| X | 获批应用和用户 OAuth 的 `POST /2/tweets`，只发布政策允许的内容 | AI Agent 教育选题可走授权 API；当前 X / Postiz 集成、写权限和额度尚未完成验收 | 非 API 网站自动化被明确禁止；可见 Codex 操作没有豁免 |
 | Reddit | 注册 App、获得批准的 Data API / Devvit 适用能力 | App 注册与用途审批；商业产品另需书面许可 | AI agent 也在现行 App 规则范围；不能假装人类或绕过注册要求 |
-| 小红书 | 账号本人使用原生编辑器发布；取得允许范围明确的官方接入后再自动化 | 个人笔记 API 权限未获证明；本次内容资格待账号级确认 | 用户协议限制未经许可的第三方工具，社区规则列明机器发布；可见 Codex 没有明确豁免 |
+| 小红书 | 账号本人使用原生编辑器发布；取得允许范围明确的官方接入后再自动化 | 个人笔记 API 权限未获证明；当前成人 AI 教育笔记的账号资格分类未知 | 用户协议限制未经许可的第三方工具，社区规则列明机器发布；可见 Codex 没有明确豁免 |
 
 以上为依据官方资料作出的工程选型建议，不是对账号安全的承诺。
 
@@ -39,6 +39,14 @@ API 的成功响应只有作品 ID，不证明视频完成处理、公开或可�
 
 YouTube 条款禁止未获许可的自动化方式访问；API 开发者政策要求用户知情、同意并对发布数据保留最终控制。工程建议是保留选题、标题、描述、可见性、AI 属性的可审阅版本及明确授权，不以登录 cookie 驱动无人值守网站脚本。[YouTube Terms](https://www.youtube.com/static?template=terms)、[Developer Policies](https://developers.google.com/youtube/terms/developer-policies?hl=en)
 
+### 旧内容下架与管理权限
+
+账号本人可在 Studio 的 Content → Visibility 选择 `Private` 并保存，作为可逆下架：视频不再出现在频道公开视频页或 YouTube 搜索，仅本人和指定分享对象可见。`Unlisted` 仍可被持有链接的人访问和转发，不能视为停止链接访问。状态回执应写“已设为私有”，不能写“已永久删除”。[隐私设置](https://support.google.com/youtube/answer/157177?hl=en)
+
+当前项目已授予的 `youtube.upload` + `youtube.readonly` 只支持上传与读取，不允许 `videos.update` 修改可见性，也不允许 `videos.delete` 删除。官方两种方法要求 `youtube`、`youtube.force-ssl` 或内容合作伙伴专用的 `youtubepartner` 中至少一个 scope；未来增加 API 管理能力需针对新权限和实际动作取得具体授权，不能沿用上传授权推定可删除。[Videos: update](https://developers.google.com/youtube/v3/docs/videos/update)、[Videos: delete](https://developers.google.com/youtube/v3/docs/videos/delete)
+
+`Delete forever` 是永久删除；替换视频文件需重新上传并获得新 URL。保留旧作品设为私有与永久删除应分别记录，原生 Studio 的功能说明也不构成无人值守网站自动化的许可。[替换与删除视频](https://support.google.com/youtube/answer/55770?hl=en)、[YouTube Terms](https://www.youtube.com/static?template=terms)
+
 ### AI 与新闻质量
 
 需要披露的是逼真或实质改变现实的 AI 内容，例如让真人说没说过的话、伪造真实地点事件、生成逼真场景，以及以 AI 音乐为主体的内容。脚本、标题、信息图等创作辅助通常不需同样披露，但不能据此隐藏其他应披露的媒体。API 支持 `status.containsSyntheticMedia`，Studio 当前帮助页称为 “AI use”。新闻视频不可把合成场景冒充现场。[GenAI disclosure](https://support.google.com/youtube/answer/14328491?hl=en)、[API 修订历史](https://developers.google.com/youtube/v3/revision_history)
@@ -55,11 +63,11 @@ YouTube 条款禁止未获许可的自动化方式访问；API 开发者政策�
 
 当前官方价格页显示一般 Post create 为 $0.015 / request，含 URL 的 Post create 为 $0.200 / request；这是 X API 的成本，不包含 Postiz 等中间商费用，价格以 Developer Console 为准。为省费用故意隐藏来源会损害内容可核验性，不应作为内容策略。[API Pricing](https://docs.x.com/x-api/getting-started/pricing)
 
-### 对本次热点请求的直接限制
+### 历史热点草稿与当前教育选题
 
 官方自动化规则允许合规、具有信息价值且有发布权的外部 RSS 等信息，但同时明确禁止自动发趋势话题、单账号或多账号重复 / 高度相似 Post，以及非 API 网站自动化。不能选择浏览器鼠标操作来消除该内容限制。AI 自动回复还另需 X 事先书面批准；不应顺手增加自动评论、自动点赞或追随等增长功能。[Automation Rules](https://help.x.com/en/rules-and-policies/x-automation)
 
-本次可交付 X 文稿与来源，由真实用户作编辑决定并手动发布。以后若做常规新闻 / 信息自动化，要使用获批 API、明确主题范围和政策审核，不构建追热榜自动发布器。
+历史诺贝尔和平奖草稿来自自动热点发现，该路线受上述趋势话题限制；保留草稿与来源不代表已发布。当前由用户另行选定的 AI Agent 教育与实践稿属于原创信息类顶层 Post，可在符合其他规则、明确用户同意且具备 App / OAuth 写权限后走正式 API。AI 自动回复机器人的额外书面审批不应套用于普通原创顶层 Post。当前 X / Postiz 接入尚未完成，不能标为自动发布已就绪，也不能改走 Codex 操作网站。[Automation Rules](https://help.x.com/en/rules-and-policies/x-automation)、[Create Posts](https://docs.x.com/x-api/posts/create-post)
 
 ## Reddit
 
@@ -76,6 +84,8 @@ YouTube 条款禁止未获许可的自动化方式访问；API 开发者政策�
 自己 profile 发帖确实是 Reddit 原生支持的功能，仍受 Reddit Rules 和 Moderator Code of Conduct 约束。它可以避免随意选定 subreddit 导致的当地主题、AI 禁令、链接格式、flair、账号年龄 / karma 门槛，但不会带来热门社区曝光，也不会免除 App 政策。[Profile tools](https://support.reddithelp.com/hc/en-us/articles/115002454126-What-kind-of-profile-moderation-tools-do-I-have)、[官方社区管理建议](https://mods.reddithelp.com/hc/en-us/articles/360002551551)
 
 不得批量向不同 subreddits 投放相同 / 高度相似文本，刷 karma、反复删除重投或用多账号操纵。不要虚构“一天几帖”“养几天账号”就一定安全的数字。真正的人类可在自己的 profile 单次发布原创且有来源的 AI 辅助文章；持续产品自动发布应先具备 App 身份与批准。本文没有查到官方明确声明“个人用户的 Codex 可见 UI 代发免于 App 注册”。[Spam](https://support.reddithelp.com/hc/en-us/articles/360043504051-Spam)
+
+换成 AI Agent 教育选题不会免除 App 注册、用途批准与访问范围要求；当前交付仍须验证这些权限，个人 profile 或原生浏览器操作没有已查明的 AI agent 豁免。[Responsible Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy)
 
 发布验收需同时检查 Post ID / permalink、作者 profile 列表与是否被 removed / spam / moderation 标记。可在个人主页访问不等于已经进入某个 subreddit feed。
 
@@ -99,9 +109,11 @@ YouTube 条款禁止未获许可的自动化方式访问；API 开发者政策�
 
 2026-07-31 社区公约 2.0 建议主动标明 AI 生成 / 辅助参与；分享应真实、有素材使用权，存疑内容核实来源，转载需授权和出处。新号不能因为改写新闻就伪装成亲历者 / 专业人士，不可用刷互动和矩阵“养号”增加可信度。[社区公约 2.0](https://pgy.xiaohongshu.com/help/detail?id=1eda0a065dd894063c2e029a49e8f6a1&userType=4)、[作者健康等级规范](https://pgy.xiaohongshu.com/help/detail?id=1e77b1987d1646def00d556d9879f19f&userType=4)
 
-本次选题为诺贝尔和平奖及 ICC / ICJ：国内官方规则把政治、经济、军事、外交等公共事务的报道和评论纳入新闻信息；公众账号运营者提供新闻信息服务需许可。改成“中立科普”不能自动证明脱离该范围。[互联网新闻信息服务管理规定](https://www.cac.gov.cn/2017-05/02/c_1120902760.htm)、[公众账号管理规定](https://www.cac.gov.cn/2021-01/22/c_1612887880656609.htm)
+历史选题为诺贝尔和平奖及 ICC / ICJ：国内官方规则把政治、经济、军事、外交等公共事务的报道和评论纳入新闻信息；公众账号运营者提供新闻信息服务需许可。改成“中立科普”不能自动证明脱离该范围。[互联网新闻信息服务管理规定](https://www.cac.gov.cn/2017-05/02/c_1120902760.htm)、[公众账号管理规定](https://www.cac.gov.cn/2021-01/22/c_1612887880656609.htm)
 
 2023 自媒体通知还要求国内外时事等显著注明来源，技术生成媒体明确标注；金融、教育、医疗、司法等专业领域需平台核验资格。2021 公众账号规定第九条涉及申请注册生产专业领域信息内容的账号，2023 通知涉及从事专业领域内容生产的自媒体。它们未明确界定偶尔的个人学习笔记与专业领域内容生产的门槛；本次也未核验该账号的资质状态。因此该条诺贝尔奖 / 国际法院科普的账号级分类仍未知，不能断言必需资质，也不能断言肯定豁免。商业专业号标识不能直接替代新闻许可或司法领域资格。向小红书支持提供这篇实际文稿，询问所需资质及提交入口，再按账号实际提示办理。[公众账号管理规定](https://www.cac.gov.cn/2021-01/22/c_1612887880656609.htm)、[自媒体管理通知](https://www.cac.gov.cn/2023-07/10/c_1690638496047430.htm)
+
+用户现已替换为面向成人的 AI Agent 教育与实践笔记。上述诺贝尔奖 / 国际法院内容的历史风险判断不能直接套用到新稿，也不能仅凭“教育”二字就断言普通学习笔记必需许可。该账号及新稿是否被平台归类为专业领域内容生产仍未知，应依据实际文稿、账号提示及平台答复确认；换题不会取得机器发布许可。[公众账号管理规定](https://www.cac.gov.cn/2021-01/22/c_1612887880656609.htm)、[自媒体管理通知](https://www.cac.gov.cn/2023-07/10/c_1690638496047430.htm)、[社区规范](https://agree.xiaohongshu.com/h5/terms/ZXXY20221213003/-1)
 
 ## 应落实到产品的机制
 
