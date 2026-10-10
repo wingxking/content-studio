@@ -1,8 +1,11 @@
 # Content Studio
 
 - Stage one runs locally on one Mac with Codex. Stage two must remain gated until stage-one acceptance is complete.
-- The complete local upgrade uses Supabase CLI with the existing Docker-compatible runtime for local database, Auth, Storage, Cron and Queues. Hosted Supabase is not its default backend; preserve current workspace artifacts until a verified migration.
-- Cloud work is feasibility and architecture research only until the local gate passes. Follow docs/local-first-build-review.zh-CN.md for the latest scope, migration boundaries and L0-L5 acceptance. Keep resettable local test instances separate from real local content.
+- The verified baseline uses Supabase CLI Docker services and native macOS API/Worker processes. The latest target is local Docker application services with local filesystem storage and bind-mounted persistent directories; preserve the running baseline until each migration passes isolated acceptance. Do not describe the target as implemented.
+- Follow docs/docker-dual-pipeline-architecture.zh-CN.md for the latest target, upstream choices and D0-D6 gates; docs/local-system-delivery.zh-CN.md records the implemented baseline. The new target supersedes older default Storage-copy/native-worker design choices. Cloud work remains feasibility research only until local acceptance; keep test instances separate from real content.
+- Default original media and generated files to LocalFS under an ignored, non-synced local bind root. Keep business state and revision authority in Supabase. Existing Storage assets remain readable until hash/reference verification and backup/restore pass; do not introduce a second authoritative media copy.
+- Article and video are independent domains, workspaces, jobs and tools, sharing evidence, immutable physical assets and infrastructure. Video creation and rendering remain explicit actions; article linkage is optional and revision-bound.
+- Prefer maintained upstream execution/tool capabilities. Evaluate pg-boss behind an isolated migration gate; never run two engines or schedule owners for the same work. Article/video deliveries share one account-serialization domain; unknown submission outcomes require reconciliation.
 - Use Chrome profile `radarxai@gmail.com` for Google, Supabase, and test-platform account operations. Verify the profile in Chrome before sign-in; never use another account silently.
 - Use Supabase whenever a database is required. Do not add SQLite, MongoDB, or a separate PostgreSQL deployment.
 - Keep strict TypeScript, no `any`, named exports, and small scoped changes.

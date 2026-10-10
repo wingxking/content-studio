@@ -1,5 +1,7 @@
 # Architecture and staged delivery
 
+Historical baseline: current implementation evidence is in [local system delivery](local-system-delivery.zh-CN.md). The latest requested Docker/LocalFS/independent-video target and migration gates are in [dual-pipeline architecture](docker-dual-pipeline-architecture.zh-CN.md); that target supersedes the older planned Storage/native-worker choices below.
+
 Decision date: 2026-10-10, Asia/Singapore. See [verified progress and architecture in Chinese](progress-and-architecture.zh-CN.md) for current implementation and live-acceptance boundaries.
 
 ## Stage one: one Mac and Codex

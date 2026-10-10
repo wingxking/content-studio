@@ -4,6 +4,8 @@ A local content workbench for one Mac and Codex. The Web UI manages reusable cre
 
 Cloud deployment remains a later phase. Local installation still needs network access for Codex models, public sources, and authorized platform APIs.
 
+The latest requested upgrade is [local Docker with independent article/video pipelines](docs/docker-dual-pipeline-architecture.zh-CN.md): bind-mounted local files, separate workspaces/workers, and selectively reused upstream components. This is the target design and migration plan. The startup, storage and runtime descriptions below document the existing baseline; the new Docker/LocalFS/pg-boss/video stack has not yet been implemented or accepted.
+
 ## Start locally
 
 ```sh

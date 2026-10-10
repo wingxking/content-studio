@@ -1,6 +1,6 @@
 # Content Studio：本地优先建设复审与实施基线
 
-> 历史方案基线：下文记录实施前的检查状态。当前已搭建的本地系统、操作命令与实际验收结果，以 [本地系统交付](local-system-delivery.zh-CN.md) 为准。
+> 历史规划基线：本文件中的当时现状不代表当前实现。已实现能力见 [本地交付记录](local-system-delivery.zh-CN.md)；最新 Docker、本地文件优先、文章/视频独立目标与 D0–D6 验收见 [双流水线升级方案](docker-dual-pipeline-architecture.zh-CN.md)。新目标取代本文件原先的 Storage 副本与宿主机 Worker 选型，云端仍仅作可行性研究。
 
 复审日期：2026-10-10（Asia/Singapore）。代码基线：`39d36fb`。本轮交付是需求复审、当前代码/本机依赖检查和官方技术资料复核；没有搭建新的 Supabase 实例、迁移真实数据或部署云服务。以下“确定”指选定工程方案，“待验收”表示尚未实现或尚未实测。
 
