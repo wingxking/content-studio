@@ -1,14 +1,16 @@
 import { readFile, mkdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { briefSchema, generatedSchema, platformSchema, accountSchema } from '../core/model.ts';
 import { doctor } from '../core/doctor.ts';
 import { generateContent } from '../core/generator.ts';
-import { readState } from '../core/store.ts';
-import { addAccount, approveDraft, cancelJob, confirmPublication, createDraft, exportJob, pausePublishing, reconcileJob, recordMetrics, replaceDraft, runDueJobs, scheduleJob, updateAccount, verifyDraftApproval } from '../core/pipeline.ts';
-import { buildMedia } from '../core/media.ts';
+import { dataDirectory, readState } from '../core/store.ts';
+import { authorizeDesktopYouTube } from '../core/youtube-oauth.ts';
+import { uploadYouTubeJob, reconcileYouTubeJob, verifyYouTubeChannel, youtubeSettingsSchema } from '../core/youtube.ts';
 import { discoverTrends, discoveryCountrySchema } from '../core/discovery.ts';
 import { saveDiscoverySnapshot } from '../core/discoverySnapshot.ts';
+import { addAccount, approveDraft, cancelJob, confirmPublication, createDraft, exportJob, pausePublishing, reconcileJob, recordMetrics, replaceDraft, runDueJobs, scheduleJob, updateAccount, verifyDraftApproval } from '../core/pipeline.ts';
+import { buildMedia } from '../core/media.ts';
 
 const loadJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(resolve(path), 'utf8')) as unknown;
 const required = (value: string | undefined, name: string): string => { if (!value) throw new Error(`Missing ${name}`); return value; };
@@ -16,8 +18,6 @@ const [command, first, second, third] = process.argv.slice(2);
 try {
   let result: unknown;
   switch (command) {
-    case 'doctor': result = await doctor(); break;
-    case 'status': result = await readState(); break;
     case 'discover': {
       const countries = first ? first.split(',').map(value => discoveryCountrySchema.parse(value)) : undefined;
       const freshnessHours = z.union([z.literal(4), z.literal(24), z.literal(48), z.literal(168)]).parse(second ? Number(second) : 24);
@@ -27,6 +27,14 @@ try {
       if (snapshot.successfulCountries.length === 0) process.exitCode = 1;
       break;
     }
+    case 'youtube-auth': {
+      result = { ...await authorizeDesktopYouTube({ clientFile: required(first, 'OAuth Desktop client JSON file'), secretDirectory: join(dataDirectory(), 'youtube', 'secrets'), onAuthorizationUrl: url => { process.stdout.write(`${JSON.stringify({ authorizationUrl: url, nextAction: 'Open this URL in Chrome profile radarxai@gmail.com and select the verified YouTube channel.' })}\n`); } }), ...await verifyYouTubeChannel() }; break;
+    }
+    case 'youtube-channel': result = await verifyYouTubeChannel(); break;
+    case 'youtube-upload': result = await uploadYouTubeJob(required(first, 'job ID'), youtubeSettingsSchema.parse(await loadJson(required(second, 'YouTube settings JSON file')))); break;
+    case 'youtube-reconcile': result = await reconcileYouTubeJob(required(first, 'job ID')); break;
+    case 'doctor': result = await doctor(); break;
+    case 'status': result = await readState(); break;
     case 'generate': {
       const brief = briefSchema.parse(await loadJson(required(first, 'brief JSON file')));
       result = await createDraft(brief, await generateContent(brief)); break;
@@ -64,7 +72,7 @@ try {
       await writeFile(resolve(folder, 'post.md'), `# ${bundle.variant.title}\n\n${bundle.variant.text}\n\n${bundle.variant.tags.map(tag => `#${tag}`).join(' ')}\n\nOpen: ${bundle.nativeUrl}\n\nMedia:\n${bundle.variant.mediaPaths.join('\n')}\n`);
       result = { folder, status: bundle.job.status, nextAction: 'Use Chrome profile radarxai@gmail.com and record the verified platform ID and URL.' }; break;
     }
-    default: result = { usage: ['doctor', 'status', 'discover [US,IN,GB,ZA] [4|24|48|168]', 'generate <brief.json>', 'import <content.json>', 'approve <draft-id>', 'account <account.json>', 'media <draft-id> <platform>', 'schedule <schedule.json>', 'run', 'pause', 'resume', 'export <job-id> <folder>', 'receipt <job-id> <url> <remote-id>', 'reconcile <job-id>', 'metrics <job-id> <metrics.json>', 'cancel <job-id>'] };
+    default: result = { usage: ['discover [US,IN,GB,ZA] [4|24|48|168]', 'youtube-auth <desktop-client.json>', 'youtube-channel', 'youtube-upload <job-id> <settings.json>', 'youtube-reconcile <job-id>', 'doctor', 'status', 'generate <brief.json>', 'import <content.json>', 'approve <draft-id>', 'account <account.json>', 'media <draft-id> <platform>', 'schedule <schedule.json>', 'run', 'pause', 'resume', 'export <job-id> <folder>', 'receipt <job-id> <url> <remote-id>', 'reconcile <job-id>', 'metrics <job-id> <metrics.json>', 'cancel <job-id>'] };
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } catch (error) {

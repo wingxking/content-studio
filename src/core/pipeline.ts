@@ -153,7 +153,7 @@ function orphaned(job: Job): boolean {
   if (!job.submissionOwner || !job.submissionStartedAt) return true;
   const parts = job.submissionOwner.split(':');
   if (parts[0] === hostname()) {
-    try { process.kill(Number(parts[1]), 0); }
+    try { process.kill(Number(parts[1]), 0); if (job.platform === 'youtube' && job.provider === 'native') return false; }
     catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return true; }
   }
   return Date.now() - Date.parse(job.submissionStartedAt) > 120000;
