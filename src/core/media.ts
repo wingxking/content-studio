@@ -10,6 +10,8 @@ const videoPlatforms: ReadonlySet<Platform> = new Set(['youtube', 'tiktok', 'bil
 const maxCards = 20;
 const maxVideoSeconds = 180;
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+const sentenceSegmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' });
 
 export interface MediaResult {
   files: string[];
@@ -29,32 +31,152 @@ function glyphWidth(character: string): number {
   return 1.05;
 }
 
-function wrapText(text: string, width: number): string[] {
+function textWidth(text: string): number {
+  return [...segmenter.segment(text)].reduce((total, item) => total + glyphWidth(item.segment), 0);
+}
+
+export function wrapText(text: string, width: number): string[] {
+  if (!Number.isFinite(width) || width < 1.05) throw new Error('The text width must fit at least one readable glyph.');
   const lines: string[] = [];
   for (const paragraph of text.split(/\r\n|\n|\r/u)) {
     let line = '';
     let used = 0;
-    for (const { segment } of segmenter.segment(paragraph)) {
-      const nextWidth = glyphWidth(segment);
-      if (line && used + nextWidth > width) {
-        lines.push(line);
-        line = '';
-        used = 0;
+    const words = [...wordSegmenter.segment(paragraph)].map(item => item.segment);
+    for (let wordIndex = 0; wordIndex < words.length; wordIndex += 1) {
+      let word = words[wordIndex] ?? '';
+      while (/^[\p{Pe}\p{Pf},.!?:;，。！？：；、]+$/u.test(words[wordIndex + 1] ?? '')) {
+        word += words[wordIndex + 1];
+        wordIndex += 1;
       }
-      line += segment;
-      used += nextWidth;
+      const wordWidth = textWidth(word);
+      if (wordWidth <= width) {
+        if (line && used + wordWidth > width) {
+          lines.push(line);
+          line = '';
+          used = 0;
+        }
+        line += word;
+        used += wordWidth;
+        continue;
+      }
+      // A long identifier or URL can exceed a whole line; split only that token.
+      for (const { segment } of segmenter.segment(word)) {
+        const nextWidth = glyphWidth(segment);
+        if (line && used + nextWidth > width) {
+          lines.push(line);
+          line = '';
+          used = 0;
+        }
+        line += segment;
+        used += nextWidth;
+      }
     }
     lines.push(line);
   }
   return lines;
 }
 
+function visibleLines(text: string, width: number): string[] {
+  return wrapText(text, width).map(line => line.trim()).filter((line, index, lines) => line || (index > 0 && index < lines.length - 1 && lines[index - 1]));
+}
+
+function isSectionHeading(line: string): boolean {
+  return /^(?:#{1,6}\s+\S|信息卡\s*[①②③④⑤⑥⑦⑧⑨⑩\d]+\s*[｜|:：]|\d+[.)、]\s*\S)/u.test(line.trim());
+}
+
+function semanticBlocks(text: string): string[] {
+  const blocks = text.split(/(?:\r\n|\n|\r){2,}/u).map(block => block.trim()).filter(Boolean);
+  const grouped: string[] = [];
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (!block) continue;
+    const next = blocks[index + 1];
+    if (!block.includes('\n') && isSectionHeading(block) && next && !isSectionHeading(next.split(/\r\n|\n|\r/u)[0] ?? '')) {
+      grouped.push(`${block}\n${next}`);
+      index += 1;
+    } else {
+      grouped.push(block);
+    }
+  }
+  return grouped;
+}
+
+function paginateText(text: string, width: number, limit: number): string[][] {
+  const pages: string[][] = [];
+  let page: string[] = [];
+  const finishPage = (): void => {
+    if (page.length) pages.push(page);
+    page = [];
+  };
+  for (const block of semanticBlocks(text)) {
+    const blockLines = visibleLines(block, width);
+    if (blockLines.length <= limit) {
+      const separator = page.length ? [''] : [];
+      if (page.length + separator.length + blockLines.length > limit) finishPage();
+      page.push(...(page.length ? separator : []), ...blockLines);
+      continue;
+    }
+    // Prefer complete sentences when a paragraph is too large for one scene.
+    finishPage();
+    for (const { segment: sentence } of sentenceSegmenter.segment(block)) {
+      const sentenceLines = visibleLines(sentence, width);
+      // Balance an oversized sentence so its final word never becomes a lone scene.
+      const chunkCount = Math.ceil(sentenceLines.length / limit);
+      const chunkSize = Math.ceil(sentenceLines.length / chunkCount);
+      for (let offset = 0; offset < sentenceLines.length; offset += chunkSize) {
+        const chunk = sentenceLines.slice(offset, offset + chunkSize);
+        if (page.length + chunk.length > limit) finishPage();
+        page.push(...chunk);
+      }
+    }
+  }
+  finishPage();
+  return pages.length ? pages : [['']];
+}
+
+function xiaohongshuPages(text: string, width: number, limit: number): string[][] {
+  const sections: string[] = [];
+  const sources: string[] = [];
+  let section: string[] = [];
+  for (const line of text.split(/\r\n|\n|\r/u)) {
+    if (/^\s*(?:来源|sources?|references?)\s*[:：]\s*https?:\/\/\S+\s*$/iu.test(line)) {
+      sources.push(line.trim());
+      continue;
+    }
+    if (isSectionHeading(line) && section.some(item => item.trim())) {
+      sections.push(section.join('\n'));
+      section = [];
+    }
+    section.push(line);
+  }
+  if (section.some(item => item.trim())) sections.push(section.join('\n'));
+  const pages = sections.flatMap(item => paginateText(item, width, limit));
+  if (sources.length) {
+    const sourceText = `来源（按正文出现顺序）\n\n${sources.map((source, index) => `${index + 1}. ${source}`).join('\n\n')}`;
+    pages.push(...paginateText(sourceText, width, limit));
+  }
+  return pages.length ? pages : [['']];
+}
+
+export function layoutMediaText(title: string, text: string, platform: Platform): { titleLines: string[]; pages: string[][] } {
+  const titleLines = wrapText(title, 17.8).map(line => line.trim());
+  if (titleLines.length > 4) throw new Error('Shorten this variant title so it fits four readable card lines.');
+  const video = videoPlatforms.has(platform);
+  const width = video ? 14.2 : 18.8;
+  const limit = video ? 7 : 14;
+  const pages = platform === 'xiaohongshu' ? xiaohongshuPages(text, width, limit) : paginateText(text, width, limit);
+  if (pages.length > maxCards) throw new Error(`This text requires ${pages.length} cards. Shorten the variant to at most ${maxCards} cards; approved text is never truncated.`);
+  return { titleLines, pages };
+}
+
 function renderCard(title: string[], body: string[], index: number, count: number, height: number): string {
   const titleSize = 50;
-  const bodySize = 48;
-  const bodyStart = height === 1920 ? 430 : 380;
+  const video = height === 1920;
+  const bodySize = video ? 64 : 48;
+  const bodyStart = video ? 520 : 380;
+  const lineHeight = video ? 94 : 64;
   const titleLines = title.map((line, lineIndex) => `<text x="84" y="${142 + lineIndex * 60}" font-size="${titleSize}" font-weight="700">${escapeXml(line)}</text>`).join('\n');
-  const bodyLines = body.map((line, lineIndex) => `<text x="84" y="${bodyStart + lineIndex * 64}" font-size="${bodySize}">${escapeXml(line)}</text>`).join('\n');
+  const bodyLines = body.map((line, lineIndex) => `<text x="84" y="${bodyStart + lineIndex * lineHeight}" font-size="${bodySize}">${escapeXml(line)}</text>`).join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="${height}" viewBox="0 0 1080 ${height}">
 <rect width="1080" height="${height}" fill="#f8f5ef"/>
 <rect x="56" y="54" width="968" height="${height - 108}" rx="28" fill="#ffffff"/>
@@ -131,13 +253,7 @@ export async function buildMedia(draft: Draft, platform: Platform): Promise<Medi
 
   const kind = videoPlatforms.has(platform) ? 'video' : 'cards';
   const height = kind === 'video' ? 1920 : 1440;
-  const titleLines = wrapText(variant.title, 17.8);
-  if (titleLines.length > 4) throw new Error('Shorten this variant title so it fits four readable card lines.');
-  const bodyLines = wrapText(variant.text, 18.8);
-  const linesPerCard = kind === 'video' ? 21 : 14;
-  const pages: string[][] = [];
-  for (let offset = 0; offset < bodyLines.length; offset += linesPerCard) pages.push(bodyLines.slice(offset, offset + linesPerCard));
-  if (pages.length > maxCards) throw new Error(`This text requires ${pages.length} cards. Shorten the variant to at most ${maxCards} cards; approved text is never truncated.`);
+  const { titleLines, pages } = layoutMediaText(variant.title, variant.text, platform);
 
   const renderer = await findTool('rsvg-convert');
   const ffmpeg = kind === 'video' ? await findTool('ffmpeg') : null;
@@ -165,7 +281,7 @@ export async function buildMedia(draft: Draft, platform: Platform): Promise<Medi
     }
 
     if (kind === 'cards') {
-      return { files: images, kind, note: `Created ${images.length} PNG cards at 1080 × 1440. Exact caption.txt and SVG sources are stored beside the cards. Review the rendered cards and approve the assembled draft again before publication.` };
+    return { files: images, kind, note: `Created ${images.length} PNG cards at 1080 × 1440. Exact caption.txt and SVG sources are stored beside the cards; standalone source URLs may be grouped on a separate source card in their original order. Review the rendered cards and approve the assembled draft again before publication.` };
     }
     if (!ffmpeg || !ffprobe || !speech) throw new Error('Required video tools were not resolved.');
     const audioPath = join(directory, 'narration.aiff');

@@ -92,7 +92,7 @@ test('missing tools yield an actionable failure before creating a media director
 
 test('oversized content and unsafe control characters fail clearly instead of being truncated', async () => {
   await withDataDirectory(async directory => {
-    await assert.rejects(buildMedia(draft('xiaohongshu', 'A paragraph.\n'.repeat(280)), 'xiaohongshu'), /approved text is never truncated/u);
+    await assert.rejects(buildMedia(draft('xiaohongshu', 'A paragraph.\n'.repeat(281)), 'xiaohongshu'), /approved text is never truncated/u);
     await assert.rejects(buildMedia(draft('xiaohongshu', 'A hidden\u0000 character.'), 'xiaohongshu'), /unsupported control characters/u);
     assert.deepEqual(await readdir(directory), []);
   });
