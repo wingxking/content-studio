@@ -53,3 +53,16 @@ Implementation, local tests, account creation, live publication, cloud persisten
 83/83 tests passed with no skips, strict TypeScript and production build passed, and the real local HTTP smoke passed. Added regional RSS discovery (all four requested feeds returned 39 candidates), a provenance-based X automation gate, paragraph/word-aware media, and explicit official YouTube OAuth/upload/reconciliation CLI. YouTube/Supabase/Postiz contract requests remain mocked; OAuth testing uses a local loopback with fake token replies.
 
 The new actual Codex draft has four platform variants, four Xiaohongshu PNGs and a 47.96-second portrait narrated MP4. It is internally approved at revision 7. Four verified native accounts are Blocked. No real OAuth, publishing job, API insertion or platform receipt exists. Cloud radar-511204 is available and the user has approved the observed YouTube API product Terms/Enable action and publication. Google Cloud now confirms successful YouTube service activation in radar-511204. Both OAuth overview and Clients table show no configured clients. The creation entry is open, but Computer Use explicitly reports the Mac is locked and automatic unlock failed. Desktop client setup/grant remain pending. Approval alone is not a platform receipt. See [run evidence](news-run-2026-10-10.zh-CN.md).
+
+## Planned Web workflow acceptance
+
+The following user-requested capabilities are design requirements, not completed functionality. See [Web design](web-product-design.zh-CN.md) for scoped local milestones.
+
+- [ ] Create, edit, pause and run discovery schedules with a prompt, selected assets, explicit time/timezone, missed-run policy and durable run history.
+- [ ] View 0–20 sourced, deduplicated hot questions for each run and select a question for fine-grained creation.
+- [ ] Persist a master revision first, then independently generate and validate the requested platform versions.
+- [ ] Refine the master, a platform or a selection through Web Codex instructions; compare and accept changes without stale responses overwriting edits.
+- [ ] Propagate master updates to untouched drafts, preserve customized fields, surface conflicts and stale facts, and invalidate only the affected publication approvals.
+- [ ] Upload and reuse images from one asset library in schedules and generation/refinement; verify selected reference images actually reach the model.
+- [ ] Create an independent video script only after an explicit Web action; render separately and never automatically rerender after a master update.
+- [ ] Recover immutable content/media revisions and inspect exact historical publication snapshots, target accounts, IDs and URLs from the Web.

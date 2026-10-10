@@ -66,7 +66,7 @@ app.get('/api/media', async (req, res) => {
   res.setHeader('Content-Disposition', `inline; filename="${basename(path).replace(/[^\w.-]/g, '_')}"`); res.sendFile(path, { dotfiles: 'allow' });
 });
 app.get('/api/docs/:name', async (req, res) => {
-  const name = z.enum(['research', 'accounts', 'architecture', 'acceptance']).parse(req.params.name);
+  const name = z.enum(['research', 'accounts', 'architecture', 'acceptance', 'web-product-design.zh-CN', 'web-technical-architecture.zh-CN', 'research-web-workflows-2026-10-10.zh-CN']).parse(req.params.name);
   res.type('text/markdown').send(await readFile(resolve('docs', `${name}.md`), 'utf8'));
 });
 const errors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {

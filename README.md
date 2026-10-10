@@ -34,6 +34,14 @@ Use your existing local Codex authentication. The app detects the official deskt
 
 The native route prepares content and records publication evidence. Review each platform's authorization and content eligibility before any creator-page operation. X trend posts require genuine human publication; Reddit agent access requires an approved App. Do not use Codex clicks or headless browsers to bypass those requirements. The explicit YouTube CLI uses authorized Data API OAuth, not Chrome cookies; its background queue does not automatically invoke uploads. API public-status readback still needs viewer playback acceptance. No live post has yet been submitted for this user's accounts.
 
+## Planned Web workflow upgrade
+
+The new design covers promptable discovery schedules, up to 20 sourced questions per run, a versioned master with independently editable platform adaptations, Web AI instructions with safe merges, a reusable asset library, explicitly created video drafts, and historical publishing snapshots. These new workflow features are planned, not implemented. The local Web Research & setup page links to all three documents:
+
+- [Web product design and phased acceptance](docs/web-product-design.zh-CN.md)
+- [Local and production technical architecture](docs/web-technical-architecture.zh-CN.md)
+- [Current official product research](docs/research-web-workflows-2026-10-10.zh-CN.md)
+
 ## Production workflow
 
 1. Run regional discovery, select a candidate and independently research primary/independent sources, or use your own original experiment. Enter the relevant source excerpts in the brief.
