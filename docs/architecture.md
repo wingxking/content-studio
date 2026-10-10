@@ -55,7 +55,7 @@ Manual publication receipts record operator-attested evidence. Domain validation
 
 The centralized X policy guard rejects explicit trend-origin briefs and legacy Google Trends provenance on automated Postiz X jobs, at scheduling and each dispatch preflight. Its narrow provenance check is not a complete classifier: the operator must accurately retain source provenance. Native handoff is a genuine human action, not permission for agent-driven X website automation. Reddit's approved App requirement and Xiaohongshu account/topic eligibility remain explicit account blockers. The current four observed accounts are registered as Blocked until their permitted publishing route is available.
 
-Google Cloud first-use setup is now complete and project radar-511204 is available. The current YouTube API enable page explicitly binds product Terms; action-time agreement and later OAuth setup/grant remain pending. No paid trial, real OAuth grant, upload or public video exists. See [account tasks](accounts.md) and [policy evidence](platform-policies-v2.zh-CN.md).
+Google Cloud first-use setup is now complete and project radar-511204 is available. The user approved the observed YouTube API Terms/Enable action, and the actual Cloud notification confirms successful activation. OAuth overview and Clients table show no configured clients. The client creation entry is open; Computer Use reports the Mac is locked, so manual unlock is needed before Desktop OAuth setup/grant. No paid trial, real OAuth grant, upload or public video exists. See [account tasks](accounts.md) and [policy evidence](platform-policies-v2.zh-CN.md).
 
 ## Stage-two gate and intended migration
 
