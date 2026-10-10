@@ -1,0 +1,54 @@
+{
+  "topicOrigin": "trend",
+  "topic": "2026 Nobel Peace Prize: Navanethem 'Navi' Pillay, and why the ICJ and ICC are different",
+  "audience": "General readers in English on X, Reddit and YouTube, and Chinese readers on Xiaohongshu who want a clear, sourced explanation of a current international news story",
+  "angle": "Create original educational explanation, not a copied news story. Verified as of 2026-10-10 04:01:58 UTC: official award announcement dated 2026-10-09. Explain Pillay's award and distinguish ICJ state disputes/advisory opinions from ICC individual criminal accountability. Attribute the award rationale to the Norwegian Nobel Committee. Avoid political rhetoric, unverified reactions, prize money, graphic conflict descriptions, and any claim that an inquiry report or award is a final court conviction. This is a cross-region rising topic, NOT verified global number one. Produce English for X, Reddit and YouTube and Simplified Chinese for Xiaohongshu. X must fit one standard 280-character post, using one source link if it fits. Reddit should include sources and a genuine factual discussion prompt without engagement bait; do not assume any subreddit accepts AI-assisted posts. Xiaohongshu title <=20 Chinese characters, three readable information cards suitable for accompanying body. YouTube variant text should be 90-115 words of plain spoken English narration suitable for approximately 45-60 seconds, no brackets/stage directions/URLs spoken aloud. Source links should be present in the master body and non-video variants. Do not imply footage or voice belongs to Pillay. Clearly describe source-backed facts vs this educational editorial framing. Keep the master article concise (under 450 words). Keep the Reddit version under 250 words. Xiaohongshu body under 600 Chinese characters, title <=20 Chinese characters. Include a concise clear AI-assisted writing/graphics disclosure in the master, Reddit and Xiaohongshu text. The X version is a draft for human publication only, since automatic trending-topic posting is prohibited. Never claim any platform post is already published. Do not include inflammatory allegations, current political reactions or any specific pending criminal case; limit the award fact to recipient, date and committee-attributed rationale. YouTube narration must use a generic narrator, never impersonate the laureate, and contain only the sourced factual distinction and original reading guidance. Images are original text cards, not documentary photographs.",
+  "sources": [
+    {
+      "title": "Norwegian Nobel Committee: Nobel Peace Prize for 2026 (2026-10-09)",
+      "url": "https://www.nobelpeaceprize.org/press/press-releases/nobel-peace-prize-for-2026",
+      "excerpt": "Primary announcement dated 9 October 2026: the Norwegian Nobel Committee awarded the 2026 Nobel Peace Prize to South African jurist Navanethem 'Navi' Pillay for work promoting peace and international law. This rationale is the committee's assessment. Its biography lists roles in South Africa's High Court, the International Criminal Tribunal for Rwanda, the International Criminal Court and as UN High Commissioner for Human Rights. It also states she is an ad hoc ICJ judge in the Myanmar genocide-convention case. Do not invent a final judgment or a permanent ICJ presidency."
+    },
+    {
+      "title": "AP: South African-born jurist Navi Pillay wins Nobel Peace Prize (2026-10-09)",
+      "url": "https://apnews.com/article/f60744c07df969e50e9e69786fdb7de1",
+      "excerpt": "Independent reporting dated 9 October 2026 corroborates that South African-born jurist and former UN human rights chief Navi Pillay won the Nobel Peace Prize. Use only that corroboration; retrieved hour metadata conflicts with announcement timing."
+    },
+    {
+      "title": "EL PAÍS: La jurista sudafricana Navi Pillay, Premio Nobel de la Paz 2026 (2026-10-09)",
+      "url": "https://elpais.com/internacional/2026-10-09/premio-nobel-de-la-paz.html",
+      "excerpt": "Independent Spanish reporting dated 9 October 2026 corroborates the laureate's identity and international-judicial career. The page displays an update at 15:46 CEST; avoid asserting a precise announcement time or repeating inconsistent prize amounts."
+    },
+    {
+      "title": "Le Monde: Nobel Peace Prize: Navanethem Pillay, a tireless advocate for international justice (2026-10-10)",
+      "url": "https://www.lemonde.fr/en/le-monde-africa/article/2026/10/10/nobel-peace-prize-navanethem-pillay-a-tireless-advocate-for-international-justice_6758438_124.html",
+      "excerpt": "Independent French newspaper profile published 10 October 2026 at 00:18 Paris time (9 October 22:18 UTC) corroborates the award and Pillay's long international-justice career."
+    },
+    {
+      "title": "International Criminal Court: About the Court (official)",
+      "url": "https://www.icc-cpi.int/about/the-court",
+      "excerpt": "The ICC investigates and, where warranted and within its jurisdiction, tries individuals accused of genocide, war crimes, crimes against humanity and aggression. It operates under the Rome Statute and complements national courts rather than replacing them. Do not suggest every allegation automatically falls within its jurisdiction or establishes guilt."
+    },
+    {
+      "title": "International Court of Justice: How the Court Works (official)",
+      "url": "https://icj-cij.org/how-the-court-works",
+      "excerpt": "The ICJ handles legal disputes between states that accept its jurisdiction, and advisory-opinion requests on legal questions from authorized UN organs and specialized agencies. Only states may be parties to contentious proceedings. These functions are distinct from an individual's criminal trial."
+    },
+    {
+      "title": "Google Trends: United States, past 24 hours (retrieved 2026-10-10)",
+      "url": "https://trends.google.com/trending?geo=US&hl=en-US",
+      "excerpt": "The directly opened page explicitly identifies United States, Past 24 hours. A retrieved snapshot lists 'navi pillay' as Active, 50K+ searches, growth 1,000%. Earlier search-cache snapshot showed 20K+. These are changing bucketed trend snapshots, not exact people, not a global ranking. Do not claim global number one."
+    },
+    {
+      "title": "Google Trends: India, past 24 hours (retrieved 2026-10-10)",
+      "url": "https://trends.google.com/trending?geo=IN&hl=en-US",
+      "excerpt": "The directly opened India past-24-hour page lists 'navi pillay' as Active, 20K+ searches, growth 900%. UK and South Africa separately indexed snapshots also list the topic as active at 10K+ each. Do not add counts across countries or interpret percentage changes as a global ranking."
+    }
+  ],
+  "platforms": [
+    "x",
+    "reddit",
+    "xiaohongshu",
+    "youtube"
+  ]
+}

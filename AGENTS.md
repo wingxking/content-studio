@@ -10,3 +10,5 @@
 - Generate content separately from publishing. Approval binds the content revision and target account. Unknown publish outcomes require reconciliation, not automatic resubmission.
 - Confirm publication with a remote identifier and platform URL; a queued job or upload alone is not a published post.
 - Read docs/architecture.md and docs/acceptance.md before expanding scope.
+
+- Enforce current platform policies before live delivery: X trend-topic drafts require genuine human publication, and X website automation is not an approved route. Reddit automated access needs App registration/approval; YouTube unattended delivery uses authorized Data API/OAuth. Check news/professional-content eligibility separately on Xiaohongshu. See docs/platform-policies-v2.zh-CN.md.

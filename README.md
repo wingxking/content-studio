@@ -2,7 +2,7 @@
 
 A local content production workbench for one Mac and Codex. Generate sourced articles and platform versions, review them, make image cards or narrated videos, then track deliveries and measured performance.
 
-The local generation, review, media, and delivery-coordination foundation is implemented. Automatic source research and live multi-platform publishing are unfinished. Stage one has not passed acceptance; stage two has not started. See [current progress and architecture in Chinese](docs/progress-and-architecture.zh-CN.md).
+The local generation, review, media, and delivery-coordination foundation is implemented. Official regional trend RSS collection and an explicit official YouTube API uploader are implemented. Independent factual research and live multi-platform publication acceptance remain unfinished. Stage one has not passed acceptance; stage two has not started. See [current progress and architecture in Chinese](docs/progress-and-architecture.zh-CN.md).
 
 ## Run
 
@@ -18,30 +18,36 @@ Use your existing local Codex authentication. The app detects the official deskt
 
 ## What works
 
+- Official Google Trends RSS discovery for US, IN, GB and ZA; time-stamped regional candidates and unverified news references.
 - Sourced brief → real Codex structured generation → master article and platform variants.
 - Versioned editing and approval tied to content and actual media hashes.
 - PNG card rendering with librsvg; actual narrated MP4 rendering with FFmpeg and macOS speech.
 - Account metadata for 12 channels, target-specific scheduling, durable state, pause, duplicate prevention, and crash recovery.
 - Documented Postiz API adapter for **X and LinkedIn text** when authorized integrations and an API key are configured.
-- Native browser packages for other channels, with explicit operator handoff and checked post-ID/URL receipts.
+- Official YouTube Desktop OAuth, channel verification, resumable upload journal and API status readback through explicit CLI commands; real authorization/upload still pending.
+- Native packages for other channels, with genuine human handoff where automation is prohibited and checked post-ID/URL receipts.
+- X trend-derived content is blocked from automatic Postiz delivery at scheduling and final dispatch.
 - Manually entered performance snapshots from measured account analytics.
 - Optional **Supabase** persistence; no other database dependency.
 
-Source briefs are entered manually; there is no automatic source collection, topic discovery, or competitor analysis. The native route prepares content and records publication evidence. It needs Codex Computer Use or the operator to perform the platform's creator flow; it is not an unattended website uploader. Postiz API acceptance is recorded as queued until manually triggered status reconciliation returns a matching platform link. Neither route has yet passed live publication acceptance for this user's accounts.
+`discover` automatically collects regional RSS candidates and related news URLs, preserving the observation time, feed date and separate traffic buckets. It never claims a global number-one trend or converts RSS headlines into verified facts. A researcher must independently verify the event and enter source excerpts before generation; the generator does not browse. Competitor analysis and automatic analytics remain unfinished.
+
+The native route prepares content and records publication evidence. Review each platform's authorization and content eligibility before any creator-page operation. X trend posts require genuine human publication; Reddit agent access requires an approved App. Do not use Codex clicks or headless browsers to bypass those requirements. The explicit YouTube CLI uses authorized Data API OAuth, not Chrome cookies; its background queue does not automatically invoke uploads. API public-status readback still needs viewer playback acceptance. No live post has yet been submitted for this user's accounts.
 
 ## Production workflow
 
-1. Research a topic using official sources or your own original experiment. Enter the relevant source excerpts in the brief.
+1. Run regional discovery, select a candidate and independently research primary/independent sources, or use your own original experiment. Enter the relevant source excerpts in the brief.
 2. Generate or import the content package; review each platform's content and facts.
 3. Approve the text; make media or attach your own files. Review the complete assets and approve the new revision.
 4. Check the intended account in the requested Chrome profile. Store safe metadata and the current blocker in Channels & accounts.
 5. Schedule an approved variant to that account. The queue submits configured API jobs and prepares native handoffs.
-6. Open/download the native package, use Codex Computer Use in Chrome, and verify the resulting post against the account's content list. Record its ID and URL.
+6. For authorized YouTube jobs, explicitly invoke the official uploader and reconcile its existing session/video. For other destinations, follow the recorded permitted route; genuinely human publication is required where policy prohibits automation. Verify the actual ID, account, URL and public visibility.
 7. Record actual analytics later. Unavailable metrics remain null.
 
 ## Codex commands
 
 ```sh
+npm run studio -- discover US,IN,GB,ZA 24
 npm run studio -- generate config/first-brief.json
 npm run studio -- status
 npm run studio -- approve <draft-id>
@@ -53,6 +59,11 @@ npm run studio -- run
 npm run studio -- export <job-id> /private/tmp/publishing-package
 npm run studio -- receipt <job-id> <actual-platform-url> <actual-post-id>
 npm run studio -- pause
+# After Google Cloud setup and an explicit OAuth grant:
+npm run studio -- youtube-auth /absolute/path/to/desktop-client.json
+npm run studio -- youtube-channel
+npm run studio -- youtube-upload <job-id> config/youtube-upload-settings.json
+npm run studio -- youtube-reconcile <job-id>
 ```
 
 `config/content.schema.json` describes an import package. Angle/audience/source data are required; there is no fabricated sample content or default account that can accidentally be published.
@@ -61,7 +72,7 @@ npm run studio -- pause
 
 Node.js 24+, npm, authenticated Codex CLI. Media generation needs `rsvg-convert`, `ffmpeg`, `ffprobe`, and macOS `say`, which were found on this Mac. A particular speech voice may need installation through macOS if unavailable. `STUDIO_TTS_VOICE` selects an installed voice.
 
-Local mode stores single-operator workspace artifacts in ignored `.studio/`: `state.json` and media. This is the local workspace mode, not a multi-tenant database. For database persistence, apply the Supabase migration and export `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and a UUID `STUDIO_WORKSPACE_ID` together. The server performs optimistic revision checks; the browser never receives the secret key. Migration application and remote Supabase persistence have not been live-verified. See [architecture](docs/architecture.md).
+Local mode stores single-operator artifacts in ignored `.studio/`: state, discovery snapshots, media, private YouTube credentials and upload journals. Credential/journal files use mode 0600 and private directories 0700. Never track this directory or share session URLs. This is the local workspace mode, not a multi-tenant database. For database persistence, apply the Supabase migration and export `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and a UUID `STUDIO_WORKSPACE_ID` together. The server performs optimistic revision checks; the browser never receives the secret key. Migration application and remote Supabase persistence have not been live-verified. See [architecture](docs/architecture.md).
 
 For Postiz, export `POSTIZ_API_KEY` and optionally `POSTIZ_BASE_URL`. Account credentials stay in Postiz or the native platform session. Do not put secrets, cookies, or browser profiles in tracked files.
 
@@ -75,4 +86,4 @@ npm run build
 npm run test:http
 ```
 
-See [research](docs/research.md), [accounts and access](docs/accounts.md), [architecture](docs/architecture.md), and [acceptance](docs/acceptance.md). Account registration, app review, public publishing, and stage-two independence must each be verified separately.
+See [latest independent research](docs/research-industry-v2.zh-CN.md), [current platform policies](docs/platform-policies-v2.zh-CN.md), [current news evidence](docs/news-topic-2026-10-10.zh-CN.md), [research](docs/research.md), [accounts and access](docs/accounts.md), [architecture](docs/architecture.md), and [acceptance](docs/acceptance.md). Account registration, app review, public publishing, and stage-two independence must each be verified separately.

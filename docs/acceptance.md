@@ -6,8 +6,8 @@ Date: 2026-10-10, Asia/Singapore. Stage one is not complete until live publishin
 
 - [x] Real Codex generation from a supplied source brief; exactly one valid variant per requested platform.
 - [x] Review/edit/approve cycle; content or media changes invalidate approval.
-- [ ] Real PNG cards and MP4 containing video plus audio; inspect visual and narration output.
-- [ ] Account metadata and intended account identity match the requested Chrome profile.
+- [x] Real PNG cards and MP4 containing video plus audio; visual samples, exact narration script and audio track inspected. Human full playback remains live acceptance.
+- [x] Four account metadata identities match the requested Chrome profile; publishing permission still blocked separately.
 - [ ] Approved content schedules to one target account without duplicate delivery.
 - [x] Pause persists; concurrent dispatch cannot create a second submission.
 - [x] Ambiguous response survives restart as needs reconciliation.
@@ -34,7 +34,8 @@ No live account has been accepted for publication in this delivery yet. A manual
 - [ ] Validate a dedicated Supabase project if cloud database persistence is selected.
 - [ ] Evaluate maintained China publishers against actual accounts before adding their adapters; pin reviewed versions.
 - [ ] Run repeated original-content cycles and record actual performance/cost.
-- [ ] Automate source discovery and analytics only after their permitted API/collector routes are verified.
+- [x] Implement official regional RSS discovery and verify a real four-country collection.
+- [ ] Integrate independent factual research and permitted automatic analytics.
 - [ ] Decide whether the initial complete stage-one platform set can be smaller than all requested destinations.
 - [ ] Start stage-two implementation only after the stage-one gate is achieved.
 
@@ -46,3 +47,9 @@ Implementation, local tests, account creation, live publication, cloud persisten
 - A real Codex CLI invocation generated a sourced master draft plus X, Xiaohongshu and YouTube variants using saved local authentication. The initial sandbox invocation failed; the authorized host invocation succeeded. No publishing credentials were used.
 - Chrome in the requested profile loaded the actual workbench, displayed the generated draft, approved its text, and produced three real Xiaohongshu PNG cards. Attaching media advanced the revision and cleared approval as required.
 - No live platform post was submitted; no account is marked accepted; no provider API credential or cloud database was configured. Browser operations stopped when the WeChat URL was rejected by Computer Use.
+
+## Latest iteration: 2026-10-10
+
+83/83 tests passed with no skips, strict TypeScript and production build passed, and the real local HTTP smoke passed. Added regional RSS discovery (all four requested feeds returned 39 candidates), a provenance-based X automation gate, paragraph/word-aware media, and explicit official YouTube OAuth/upload/reconciliation CLI. YouTube/Supabase/Postiz contract requests remain mocked; OAuth testing uses a local loopback with fake token replies.
+
+The new actual Codex draft has four platform variants, four Xiaohongshu PNGs and a 47.96-second portrait narrated MP4. It is internally approved at revision 7. Four verified native accounts are Blocked. No real OAuth, publishing job, API insertion or platform receipt exists. Cloud radar-511204 is now available; the current product Terms enable step and subsequent OAuth setup/grant remain pending. See [run evidence](news-run-2026-10-10.zh-CN.md).

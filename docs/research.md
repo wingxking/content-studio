@@ -2,6 +2,10 @@
 
 Reviewed 2026-10-10 in Asia/Singapore. The linked [prior pipeline discussion](https://chatgpt.com/c/6ac9046a-b00c-83ec-ae39-6e0984eac049) was read through the authenticated chat connector. Its recommendations were starting hypotheses; this report independently rechecked current primary documentation. Price and permission details are point-in-time evidence.
 
+## Latest policy and product refresh
+
+See [second-round industry research in Chinese](research-industry-v2.zh-CN.md), [four-platform publishing policies](platform-policies-v2.zh-CN.md), and [the current source-backed news topic](news-topic-2026-10-10.zh-CN.md). These supersede older assumptions about account setup and automation permission: X prohibits automated trend-topic posts and non-API website automation; Reddit requires approved App access; YouTube should use authorized Data API publishing; Xiaohongshu note publishing and content eligibility need explicit verification. Native packages remain human handoffs, not permission to automate a website.
+
 ## Recommended route
 
 Build a local creator workbench around Codex generation, explicit evidence, media templates, and a durable delivery ledger. Reuse a documented publisher where possible; use Chrome and Codex for verified native workflows where accounts or APIs require it. Prefer a small number of verified adapters over adopting a large publisher stack that conflicts with Supabase or depends on undocumented browser sessions.

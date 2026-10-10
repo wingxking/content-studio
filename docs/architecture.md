@@ -6,22 +6,27 @@ Decision date: 2026-10-10, Asia/Singapore. See [verified progress and architectu
 
 ```mermaid
 flowchart LR
-  A[Manually entered source excerpts and original evidence] --> B[Content brief]
+  T[Official regional Google Trends RSS] --> R[Unverified candidates and news URLs]
+  R --> A[Independent source verification and excerpts]
+  A --> B[Content brief]
   B --> C[Local Codex structured generation]
   C --> D[Master article and platform versions]
   D --> E[Review and approve revision]
   E --> F[PNG cards and narrated MP4]
   F --> G[Review complete assets and approve]
   G --> H[Account-specific delivery queue]
-  H --> I[Postiz text adapter - currently unconfigured]
-  H --> J[Native package and operator handoff]
+  H --> P[Platform policy and target checks]
+  P --> I[Postiz text adapter - currently unconfigured]
+  P --> Y[Explicit YouTube official API CLI - OAuth pending]
+  P --> J[Native package and genuine human handoff]
   I -. Manual reconciliation .-> K[Provider status or attested platform URL]
   J -. Separate creator-page operation and receipt .-> K
+  Y -. Official API readback plus separate viewer acceptance .-> K
   K --> L[Manually entered performance snapshots]
   H --> S[Local artifacts or Supabase state]
 ```
 
-Automatic source discovery, URL collection, competitor analysis and analytics ingestion are not implemented. The native path exports a package and waits for an operator; it does not execute a browser publisher. Postiz is unconfigured and no platform has passed live publication acceptance.
+Regional trend and related news-reference discovery are implemented through the `discover` CLI. Independent article verification/excerpt collection, competitor analysis and analytics ingestion are not automated. RSS observation dates are not article dates, the traffic window is not inferred, country bucket counts are never summed, and lexical country-coverage ranking is not a global popularity score. The native path exports a package and waits for an operator; it does not execute a browser publisher. Postiz is unconfigured and no platform has passed live publication acceptance.
 
 The small custom coordinator owns evidence, revision approval, account selection, job state and result reconciliation. Maintained upstream components own model execution, media rendering, and API-based delivery. React, Vite, Express and Zod provide the workbench and validated interface. Postiz is called through its documented public API; its AGPL source is not embedded into this product. Broader adapters are deferred until their actual accounts and contracts are verified.
 
@@ -33,18 +38,24 @@ The implementation does not self-host AiToEarn because its current complete stac
 - Optional database mode: Supabase PostgREST with a workspace JSON record and optimistic revision compare-and-swap. Enable RLS and revoke anonymous/authenticated table access. Only the local server has the secret key. This schema is a stage-one persistence option, not a completed SaaS tenant design.
 - Supabase requires all three environment values; partial configuration fails explicitly rather than silently switching stores. Copying local state into an existing cloud workspace is an explicit operator migration, never an automatic merge.
 - Media stays local in stage one, even when job metadata is in Supabase. Cloud storage and a durable render worker belong to stage two.
-- Native platform credentials stay in Chrome or approved upstream integrations. Do not export Chrome cookies into this project.
+- Native platform credentials stay in Chrome or approved upstream integrations. Official YouTube Desktop OAuth credentials live only in private ignored files; authorization uses PKCE/state and a random loopback callback. Upload scopes require explicit user consent and live channel readback. Do not export Chrome cookies into this project.
 - Codex runs from an isolated temporary directory, without publishing/Supabase environment secrets, with ephemeral structured output and a read-only sandbox. Source excerpts are untrusted data. The generator prompt prohibits tool use; full OS-level tool/network isolation is not a sandbox claim.
 
 ## Publishing state and recovery
 
-`scheduled → submitting → queued → published` is the API path. Native delivery becomes `awaiting_operator`. A stopped worker, timeout or unrecognized response becomes `needs_reconciliation`. An API HTTP success is queued evidence, not a live platform post.
+`scheduled → submitting → queued → published` is the API path. Native delivery becomes `awaiting_operator`. A stopped worker, timeout or unrecognized response becomes `needs_reconciliation`. An API HTTP success is queued evidence, not a live platform post. Explicit YouTube upload checks the selected channel, saves a private resumable journal before non-idempotent requests, and reconciles the same session/video. It confirms public/processed API state separately from viewer playback. It does not start a second upload after an ambiguous result.
 
 Before a non-idempotent request the coordinator persists the attempt and owner. Each request targets one integration. The content key prevents duplicate active/confirmed content to the same account, including across draft edits. Approval binds actual media bytes and content; changes invalidate it. Known parameter/authentication rejection is distinct from an uncertain server/network outcome. There is no automatic blind retry.
 
 The local queue checks every 30 seconds while `npm run dev` runs. This timer dispatches due submissions only; provider reconciliation is manually triggered through the UI or CLI. It catches missed due times on the next dispatch. Global pause persists across restarts. It does not wake a sleeping Mac, claim autonomous operation while the server is stopped, or automatically infer publication from an absent provider search result.
 
 Manual publication receipts record operator-attested evidence. Domain validation reduces accidental wrong-platform links; it does not independently inspect private account content. Provider reconciliation records provider-reported publication. Public visibility and intended-account readback remain live acceptance requirements.
+
+## Platform policy boundaries
+
+The centralized X policy guard rejects explicit trend-origin briefs and legacy Google Trends provenance on automated Postiz X jobs, at scheduling and each dispatch preflight. Its narrow provenance check is not a complete classifier: the operator must accurately retain source provenance. Native handoff is a genuine human action, not permission for agent-driven X website automation. Reddit's approved App requirement and Xiaohongshu account/topic eligibility remain explicit account blockers. The current four observed accounts are registered as Blocked until their permitted publishing route is available.
+
+Google Cloud first-use setup is now complete and project radar-511204 is available. The current YouTube API enable page explicitly binds product Terms; action-time agreement and later OAuth setup/grant remain pending. No paid trial, real OAuth grant, upload or public video exists. See [account tasks](accounts.md) and [policy evidence](platform-policies-v2.zh-CN.md).
 
 ## Stage-two gate and intended migration
 
