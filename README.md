@@ -2,7 +2,7 @@
 
 A local content production workbench for one Mac and Codex. Generate sourced articles and platform versions, review them, make image cards or narrated videos, then track deliveries and measured performance.
 
-Stage one is implemented locally; live multi-platform acceptance is still pending account access and publishing permissions. Stage two has not started.
+The local generation, review, media, and delivery-coordination foundation is implemented. Automatic source research and live multi-platform publishing are unfinished. Stage one has not passed acceptance; stage two has not started. See [current progress and architecture in Chinese](docs/progress-and-architecture.zh-CN.md).
 
 ## Run
 
@@ -24,10 +24,10 @@ Use your existing local Codex authentication. The app detects the official deskt
 - Account metadata for 12 channels, target-specific scheduling, durable state, pause, duplicate prevention, and crash recovery.
 - Documented Postiz API adapter for **X and LinkedIn text** when authorized integrations and an API key are configured.
 - Native browser packages for other channels, with explicit operator handoff and checked post-ID/URL receipts.
-- Performance snapshots from measured account analytics.
+- Manually entered performance snapshots from measured account analytics.
 - Optional **Supabase** persistence; no other database dependency.
 
-The native route prepares content and records publication evidence. It needs Codex Computer Use or the operator to perform the platform's creator flow; it is not an unattended website uploader. Postiz API acceptance is recorded as queued until status reconciliation returns a matching platform link. Neither route has yet passed live publication acceptance for this user's accounts.
+Source briefs are entered manually; there is no automatic source collection, topic discovery, or competitor analysis. The native route prepares content and records publication evidence. It needs Codex Computer Use or the operator to perform the platform's creator flow; it is not an unattended website uploader. Postiz API acceptance is recorded as queued until manually triggered status reconciliation returns a matching platform link. Neither route has yet passed live publication acceptance for this user's accounts.
 
 ## Production workflow
 

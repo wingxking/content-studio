@@ -1,26 +1,27 @@
 # Architecture and staged delivery
 
-Decision date: 2026-10-10, Asia/Singapore.
+Decision date: 2026-10-10, Asia/Singapore. See [verified progress and architecture in Chinese](progress-and-architecture.zh-CN.md) for current implementation and live-acceptance boundaries.
 
 ## Stage one: one Mac and Codex
 
 ```mermaid
 flowchart LR
-  A[Official sources and original evidence] --> B[Content brief]
+  A[Manually entered source excerpts and original evidence] --> B[Content brief]
   B --> C[Local Codex structured generation]
   C --> D[Master article and platform versions]
   D --> E[Review and approve revision]
   E --> F[PNG cards and narrated MP4]
   F --> G[Review complete assets and approve]
   G --> H[Account-specific delivery queue]
-  H --> I[Configured Postiz text adapter]
-  H --> J[Chrome and Codex creator workflow]
-  I --> K[Provider status and platform URL]
-  J --> K
-  K --> L[Measured performance snapshots]
-  L --> B
+  H --> I[Postiz text adapter - currently unconfigured]
+  H --> J[Native package and operator handoff]
+  I -. Manual reconciliation .-> K[Provider status or attested platform URL]
+  J -. Separate creator-page operation and receipt .-> K
+  K --> L[Manually entered performance snapshots]
   H --> S[Local artifacts or Supabase state]
 ```
+
+Automatic source discovery, URL collection, competitor analysis and analytics ingestion are not implemented. The native path exports a package and waits for an operator; it does not execute a browser publisher. Postiz is unconfigured and no platform has passed live publication acceptance.
 
 The small custom coordinator owns evidence, revision approval, account selection, job state and result reconciliation. Maintained upstream components own model execution, media rendering, and API-based delivery. React, Vite, Express and Zod provide the workbench and validated interface. Postiz is called through its documented public API; its AGPL source is not embedded into this product. Broader adapters are deferred until their actual accounts and contracts are verified.
 
@@ -41,7 +42,7 @@ The implementation does not self-host AiToEarn because its current complete stac
 
 Before a non-idempotent request the coordinator persists the attempt and owner. Each request targets one integration. The content key prevents duplicate active/confirmed content to the same account, including across draft edits. Approval binds actual media bytes and content; changes invalidate it. Known parameter/authentication rejection is distinct from an uncertain server/network outcome. There is no automatic blind retry.
 
-The local queue checks every 30 seconds while `npm run dev` runs. It catches missed due times on the next dispatch. Global pause persists across restarts. It does not wake a sleeping Mac, claim autonomous operation while the server is stopped, or automatically infer publication from an absent provider search result.
+The local queue checks every 30 seconds while `npm run dev` runs. This timer dispatches due submissions only; provider reconciliation is manually triggered through the UI or CLI. It catches missed due times on the next dispatch. Global pause persists across restarts. It does not wake a sleeping Mac, claim autonomous operation while the server is stopped, or automatically infer publication from an absent provider search result.
 
 Manual publication receipts record operator-attested evidence. Domain validation reduces accidental wrong-platform links; it does not independently inspect private account content. Provider reconciliation records provider-reported publication. Public visibility and intended-account readback remain live acceptance requirements.
 
