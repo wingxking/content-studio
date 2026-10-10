@@ -54,6 +54,8 @@ Codex 使用现有 `exec` 作为可靠起点，增加 `--json` 后仅转换允�
 
 产品数据应保存：`scheduleId`、IANA 时区（默认 Asia/Singapore）、用户选择的本地时间/频率、`nextRunAtUtc`、采集 prompt 版本、素材引用、信息源策略、最多 20 个问题、单次时间/调用预算、启用状态与错过执行策略。
 
+Prompt implementation: use the existing shared `buildDiscoveryPrompt()` rather than a separate scheduler policy, and snapshot `CONTENT_GUIDANCE_VERSION` with the task instructions and source inputs. Future consumers must validate the question cap, allowed assessments, source membership and deduplication before storing results; uncertain policy/destination context cannot become publication-ready. Article generation already calls `buildArticlePrompt()`. Refinement and explicit-video builders are exportable prompts pending their workers. See [integration boundaries](content-prompt-workflows.md).
+
 全局 scheduler 每分钟扫描到期任务；用一个事务锁住到期记录、建立唯一的 `scheduleRun`、推进 nextRun、发送队列消息。运行唯一键为 `workspaceId + scheduleId + scheduledAtUtc`，同一次计划重复触发只返回既有记录。普通用户用“每天 09:00”而不是 cron 编辑器，界面显示下一次执行的本地时间和时区。
 
 推荐默认错过策略是“恢复后补最近一次”，把其他错过槽记录为 skipped；允许用户改为“全部补跑（有上限）”或“跳过”。热点有有效期限，过期 queued 任务不应突然生成昨天的热点。当上次热点采集仍在运行时，合并下一次采集或记录 skipped，不能无限堆积。一次执行不足 20 个可信问题就返回真实数量和原因，不为了凑数输出。Scheduler 的 prompt 决定选题、过滤和关注角度，信息源策略决定实际采集范围，两者分别保存。

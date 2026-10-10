@@ -272,13 +272,13 @@ test('a store failure after remote acceptance leaves submitting for reconciliati
 test('Codex generation runs isolated without publishing secrets and validates its exact outputs', async () => {
   const executable = join(directory, 'fake-codex'); const trace = join(directory, 'trace.json');
   const output = generated();
-  const script = `#!${process.execPath}\nimport { writeFileSync } from 'node:fs'; const args = process.argv.slice(2); process.stdin.resume(); process.stdin.on('end', () => { writeFileSync(${JSON.stringify(trace)}, JSON.stringify({ args, cwd: process.cwd(), hasPostiz: Boolean(process.env.POSTIZ_API_KEY), hasSupabase: Boolean(process.env.SUPABASE_SECRET_KEY) })); writeFileSync(args[args.indexOf('-o') + 1], ${JSON.stringify(JSON.stringify(output))}); });\n`;
-  await writeFile(executable, script, { mode: 0o700 }); process.env.CODEX_BIN = executable; process.env.POSTIZ_API_KEY = 'never-inherit-this'; process.env.SUPABASE_SECRET_KEY = 'never-inherit-this-either';
+  const script = () => `#!${process.execPath}\nimport { writeFileSync } from 'node:fs'; const args = process.argv.slice(2); process.stdin.resume(); process.stdin.on('end', () => { writeFileSync(${JSON.stringify(trace)}, JSON.stringify({ args, cwd: process.cwd(), hasPostiz: Boolean(process.env.POSTIZ_API_KEY), hasSupabase: Boolean(process.env.SUPABASE_SECRET_KEY) })); writeFileSync(args[args.indexOf('-o') + 1], ${JSON.stringify(JSON.stringify({ assessment: { status: 'allowed', reasons: ['Practical software workflow with supplied evidence.'] }, content: output }))}); });\n`;
+  await writeFile(executable, script(), { mode: 0o700 }); process.env.CODEX_BIN = executable; process.env.POSTIZ_API_KEY = 'never-inherit-this'; process.env.SUPABASE_SECRET_KEY = 'never-inherit-this-either';
   assert.deepEqual(await generateContent(brief()), output);
   const details = JSON.parse(await readFile(trace, 'utf8')) as { args: string[]; cwd: string; hasPostiz: boolean; hasSupabase: boolean };
   assert.equal(details.hasPostiz, false); assert.equal(details.hasSupabase, false); assert.notEqual(details.cwd, process.cwd());
   for (const flag of ['--ephemeral', '--ignore-user-config', '--sandbox', 'read-only', '--output-schema', '--skip-git-repo-check']) assert.ok(details.args.includes(flag));
   output.variants[0]!.mediaPaths = ['/invented/video.mp4'];
-  await writeFile(executable, script.replace(JSON.stringify(JSON.stringify(generated())), JSON.stringify(JSON.stringify(output))), { mode: 0o700 });
+  await writeFile(executable, script(), { mode: 0o700 });
   await assert.rejects(generateContent(brief()), /invent media/);
 });

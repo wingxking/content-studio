@@ -1,0 +1,23 @@
+{
+  "platforms": [
+    "xiaohongshu",
+    "youtube",
+    "reddit",
+    "linkedin"
+  ],
+  "audience": "Solo creators building a reliable content publishing workflow",
+  "instruction": "Select up to five distinct practical questions about reliable creator publishing from the supplied sources. Favor a clear audience problem and an original checklist or comparison. Return fewer questions if evidence overlaps or is insufficient; do not infer a trend rank.",
+  "sources": [
+    {
+      "title": "Postiz public API create posts",
+      "url": "https://docs.postiz.com/public-api/posts/create",
+      "excerpt": "The create request can schedule a post. Its response contains postId and integration fields. This response confirms creation of a publishing task, not actual public visibility."
+    },
+    {
+      "title": "Postiz public API list posts",
+      "url": "https://docs.postiz.com/public-api/posts/list",
+      "excerpt": "The list endpoint exposes posts with state, publishDate, and releaseURL. A pipeline must query the outcome and inspect the resulting platform link rather than treating the create response as publication."
+    }
+  ],
+  "maxQuestions": 5
+}

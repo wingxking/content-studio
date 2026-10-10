@@ -12,3 +12,7 @@
 - Read docs/architecture.md and docs/acceptance.md before expanding scope.
 
 - Enforce current platform policies before live delivery: X trend-topic drafts require genuine human publication, and X website automation is not an approved route. Reddit automated access needs App registration/approval; YouTube unattended delivery uses authorized Data API/OAuth. Check news/professional-content eligibility separately on Xiaohongshu. See docs/platform-policies-v2.zh-CN.md.
+
+- For content research, discovery/scheduler prompts, generation and refinement, use `.agents/skills/content-editorial/SKILL.md` and `docs/content-growth-guidance.md`.
+- The owner's editorial exclusions take precedence over reach: exclude gender discrimination, religion, war/armed conflict, politics/elections/geopolitics, and the additional sensitive themes defined in `src/core/content-prompts.ts`. Do not reframe an excluded topic as a neutral explainer.
+- Keep shared prompt policy in `src/core/content-prompts.ts`; article generation executes it, while discovery/refinement/video builders are prompt exports until their respective workers are implemented. Generated safety assessment is model-reported, not independent moderation or publication clearance.

@@ -49,6 +49,8 @@
 
 > 寻找过去 24 小时值得向独立开发者解释的 AI 产品与工具变化。优先正式发布和实际案例，过滤纯融资消息与重复转载。把每个事件写成一个可回答的问题，列出来源和它对目标读者的影响。最多返回 12 个问题。
 
+Scheduler tasks must compose their task-specific instructions with `buildDiscoveryPrompt()` from `src/core/content-prompts.ts`. The shared editorial exclusions apply before ranking; excluded or uncertain subjects do not become questions or articles. Use the selected platform profiles and [researched growth guidance](content-growth-guidance.md), then compare real audience-quality metrics rather than promise promotion. [Prompt exports](content-prompt-workflows.md) are implemented; the custom scheduler remains planned.
+
 prompt 决定筛选和问题表述；真实来源连接器决定能访问哪些数据。修改 prompt 不会自动获得社交平台数据权限。任务保存时生成配置修订；已开始执行的批次继续使用当时的配置和素材快照。
 
 默认“仅生成问题”。采集任务不会默认写长文、生成视频或发布。每轮可返回 0–20 条，不为凑够 20 条制造问题。每日 08:30 只是表单示例，不替用户创建真实定时任务。

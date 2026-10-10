@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { briefSchema, generatedSchema, platformSchema, accountSchema } from '../core/model.ts';
 import { doctor } from '../core/doctor.ts';
 import { generateContent } from '../core/generator.ts';
+import { buildArticlePrompt, buildDiscoveryPrompt, buildRefinementPrompt, buildVideoScriptPrompt, discoveryPromptInputSchema, refinementPromptInputSchema, videoScriptPromptInputSchema } from '../core/content-prompts.ts';
 import { dataDirectory, readState } from '../core/store.ts';
 import { authorizeDesktopYouTube } from '../core/youtube-oauth.ts';
 import { uploadYouTubeJob, reconcileYouTubeJob, verifyYouTubeChannel, youtubeSettingsSchema } from '../core/youtube.ts';
@@ -18,6 +19,16 @@ const [command, first, second, third] = process.argv.slice(2);
 try {
   let result: unknown;
   switch (command) {
+    case 'prompt': {
+      const mode = z.enum(['article', 'discovery', 'refinement', 'video']).parse(first);
+      const input = await loadJson(required(second, 'prompt input JSON file'));
+      const prompt = mode === 'article' ? buildArticlePrompt(briefSchema.parse(input))
+        : mode === 'discovery' ? buildDiscoveryPrompt(discoveryPromptInputSchema.parse(input))
+        : mode === 'refinement' ? buildRefinementPrompt(refinementPromptInputSchema.parse(input))
+        : buildVideoScriptPrompt(videoScriptPromptInputSchema.parse(input));
+      result = prompt;
+      break;
+    }
     case 'discover': {
       const countries = first ? first.split(',').map(value => discoveryCountrySchema.parse(value)) : undefined;
       const freshnessHours = z.union([z.literal(4), z.literal(24), z.literal(48), z.literal(168)]).parse(second ? Number(second) : 24);
@@ -72,9 +83,9 @@ try {
       await writeFile(resolve(folder, 'post.md'), `# ${bundle.variant.title}\n\n${bundle.variant.text}\n\n${bundle.variant.tags.map(tag => `#${tag}`).join(' ')}\n\nOpen: ${bundle.nativeUrl}\n\nMedia:\n${bundle.variant.mediaPaths.join('\n')}\n`);
       result = { folder, status: bundle.job.status, nextAction: 'Use Chrome profile radarxai@gmail.com and record the verified platform ID and URL.' }; break;
     }
-    default: result = { usage: ['discover [US,IN,GB,ZA] [4|24|48|168]', 'youtube-auth <desktop-client.json>', 'youtube-channel', 'youtube-upload <job-id> <settings.json>', 'youtube-reconcile <job-id>', 'doctor', 'status', 'generate <brief.json>', 'import <content.json>', 'approve <draft-id>', 'account <account.json>', 'media <draft-id> <platform>', 'schedule <schedule.json>', 'run', 'pause', 'resume', 'export <job-id> <folder>', 'receipt <job-id> <url> <remote-id>', 'reconcile <job-id>', 'metrics <job-id> <metrics.json>', 'cancel <job-id>'] };
+    default: result = { usage: ['prompt <article|discovery|refinement|video> <input.json>', 'discover [US,IN,GB,ZA] [4|24|48|168]', 'youtube-auth <desktop-client.json>', 'youtube-channel', 'youtube-upload <job-id> <settings.json>', 'youtube-reconcile <job-id>', 'doctor', 'status', 'generate <brief.json>', 'import <content.json>', 'approve <draft-id>', 'account <account.json>', 'media <draft-id> <platform>', 'schedule <schedule.json>', 'run', 'pause', 'resume', 'export <job-id> <folder>', 'receipt <job-id> <url> <remote-id>', 'reconcile <job-id>', 'metrics <job-id> <metrics.json>', 'cancel <job-id>'] };
   }
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  process.stdout.write(command === 'prompt' && typeof result === 'string' ? `${result}\n` : `${JSON.stringify(result, null, 2)}\n`);
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : 'Command failed'}\n`); process.exitCode = 1;
 }
