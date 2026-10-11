@@ -28,13 +28,13 @@ Local intake accepts assets up to 500 MiB. Reviewed MP4 upload remains size-boun
 | 平台 | 当前实测 | 必需下一步 |
 | --- | --- | --- |
 | Reddit | 已登录，头像菜单为 `u/radarxai26` | 获准 App/provider、匹配 Postiz integration、明确测试 subreddit、当前规则与必需 flair |
-| Product Hunt | Google Continue 已完成；已登录 `coding open / @coding_open`，提交页可见产品 URL 输入框；onboarding 仍为第 1/2 步 | 由本人确认已满 16 岁后完成 onboarding；提供真实公开产品 URL/名称/资料。已登记 native/Blocked，不把登录或本地资料包当成上线 |
+| Product Hunt | Google Continue 已完成；已登录 `coding open / @coding_open`，提交页可见产品 URL 输入框；onboarding 仍为第 1/2 步 | 年龄声明已获确认并勾选；三项邮件订阅默认选中，待本人选择保留或取消后提交 onboarding。仍需真实公开产品 URL/资料；native/Blocked |
 | 微信公众号 | 本轮未重试；历史 Computer Use 明确禁止此 URL | 由账号管理员在允许环境扫码，检查账号类型与实际发布 API 权限；不可绕过工具限制 |
 | 知乎 | `zhuanlan.zhihu.com/write` 跳到登录；没有可见 Google 入口 | 本人在已打开标签扫码/短信登录；只提供非敏感可见身份及专栏权限 |
 | 小红书 | 已登录创作后台，显示 `ziv`、图文/视频入口 | 核对账号内容资格、AI 声明及获准路线；保持已有权限阻塞，登录不等于自动发布许可 |
 | Bilibili | 创作中心跳到 passport 登录，没有可见 Google 入口 | 本人在已打开标签扫码/短信登录，再核对 UID、专栏/视频投稿权限 |
 
-Google 邮箱不能替代中国平台的手机/管理员身份验证。Product Hunt 的最终 Google Continue 已根据用户 `approve` 完成；随后 onboarding 要求声明「已满 16 岁」，没有替本人猜测年龄。`/posts/new` 可打开，但仍提示 Complete onboarding，尚无真实产品 URL；未创建远端草稿或公开 launch，也未获得发布 API 权限。本地账号 `coding open (@coding_open)` 保持 Blocked，发布队列与六个既有任务不变。新密码、验证码、恢复码和私有会话不得发到聊天。完成登录后回复「已登录」及可见用户名即可继续核验。
+Google 邮箱不能替代中国平台的手机/管理员身份验证。Product Hunt 的最终 Google Continue 已根据用户 `approve` 完成；随后用户再次确认，已勾选「已满 16 岁」。三项 newsletter 默认选中；自动审批拒绝了未经明确授权的订阅变更。尚未点击 Get Started，正在等待用户选择保留或取消订阅；onboarding 仍为第 1/2 步。`/posts/new` 可打开，但仍提示 Complete onboarding，尚无真实产品 URL；未创建远端草稿或公开 launch，也未获得发布 API 权限。本地账号 `coding open (@coding_open)` 保持 Blocked，发布队列与六个既有任务不变。新密码、验证码、恢复码和私有会话不得发到聊天。完成登录后回复「已登录」及可见用户名即可继续核验。
 
 ## Latest four-account verification: 2026-10-10
 
@@ -77,7 +77,7 @@ The four-account verification above supersedes the earlier Reddit, YouTube, X an
 
 An API key is not a Google registration credential. Sign in to a hosted or existing approved Postiz installation, connect the intended X, LinkedIn or approved Reddit account, and configure its API key locally through the environment/OS secret store. Query integrations using the documented API; enter the exact integration ID into the workbench. The adapter verifies the integration exists, is enabled and matches the selected platform before submission. No Postiz subscription or billing upgrade was purchased.
 
-Registering native metadata as Connected alone records an operator check, not an automatically tested OAuth credential. YouTube is now Connected based on the real official OAuth grant, exact channel readback and published video. X, Reddit and Xiaohongshu remain Blocked with their verified identities and policy/access tasks. Product Hunt is a fifth native account, Blocked pending its age declaration/onboarding and real-product launch facts; login is not publisher authorization. Use Needs login or Blocked until the creator page and visible account identity have actually been checked. Existing account metadata must be updated when login is renewed; do not create duplicate account entries to bypass a blocker.
+Registering native metadata as Connected alone records an operator check, not an automatically tested OAuth credential. YouTube is now Connected based on the real official OAuth grant, exact channel readback and published video. X, Reddit and Xiaohongshu remain Blocked with their verified identities and policy/access tasks. Product Hunt is a fifth native account, Blocked pending the newsletter preference/onboarding submission and real-product launch facts; login is not publisher authorization. Use Needs login or Blocked until the creator page and visible account identity have actually been checked. Existing account metadata must be updated when login is renewed; do not create duplicate account entries to bypass a blocker.
 
 ### Reddit Postiz configuration
 
