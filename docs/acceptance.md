@@ -9,7 +9,8 @@ Date: 2026-10-10, Asia/Singapore. The latest scope accepts a complete local appl
 - [x] Actual Linux Codex generated a 453-character master and 465-character Zhihu/Bilibili article variants with source links; fixed required/nullable output schema compatibility and added direct/remote validation regression.
 - [x] Chrome profile `coding (radarxai@gmail.com)` verified; six-platform capability view and video-format exclusions checked.
 - [x] Product Hunt fields edited and saved in Web (r1→r2); the old publication snapshot retained r1 fields. All six QA deliveries remained `awaiting_operator`, zero attempts and no remote IDs.
-- [x] Fresh Reddit `u/radarxai26` and Xiaohongshu `ziv` login checked; Product Hunt stopped at final Google Continue/terms; Zhihu and Bilibili require owner QR/SMS login.
+- [x] Fresh Reddit `u/radarxai26` and Xiaohongshu `ziv` login checked; Zhihu and Bilibili require owner QR/SMS login.
+- [x] 2026-10-12: owner approved the final Product Hunt Google Continue. Authenticated `coding open / @coding_open` and `/posts/new` product-URL form observed in the requested Chrome profile; native account recorded as Blocked. Onboarding is still step 1 of 2, awaiting the owner age-16-or-older declaration; the launch page asks for complete onboarding. No remote draft, publishing API grant or launch was created. Local account count is five; six existing job status/attempt/remote-ID tuples and paused publication were verified unchanged.
 - [ ] Live Reddit approved API/provider integration and destination acceptance.
 - [ ] Product Hunt actual personal onboarding and real-product launch/draft acceptance.
 - [ ] WeChat, Zhihu, Xiaohongshu and Bilibili account-specific remote draft/submission/public visibility acceptance.
