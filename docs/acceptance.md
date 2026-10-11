@@ -18,6 +18,18 @@ Date: 2026-10-10, Asia/Singapore. The latest scope accepts a complete local appl
 
 See [upgrade implementation and blockers](publishing-capabilities-upgrade-2026-10-11.zh-CN.md). No new live external content was submitted in this upgrade. Earlier native and Docker channel evidence is preserved below.
 
+## Live authentication recheck: 2026-10-12
+
+- [x] Product Hunt authenticated account and product URL form persisted after reload; no onboarding banner. Actual product URL and remote launch are still pending.
+- [x] Reddit account menu again showed `u/radarxai26`. Its existing `DevPlatform Actions` grant was inspected read-only and was not reused, changed or mistaken for this application's publisher approval.
+- [x] Xiaohongshu creator identity `ziv`, image/video/long-article entries and empty draft list checked. Red Skill hub describes reviewed Skill attachments; it does not demonstrate automated note-publishing permission.
+- [x] Zhihu and Bilibili article routes again required phone/App sign-in; no account or creator permission fabricated. The historically prohibited WeChat URL was not retried.
+- [x] Official YouTube channel check and complete existing-video playback passed as recorded below. Missing Postiz key produced the expected explicit HTTP 400 configuration diagnostic.
+- [x] Four existing account notes/timestamps updated through the local API. All drafts and complete existing job records stayed identical; five accounts, six jobs, paused publication and disabled scheduler retained. Six priority platforms have automatic=false and remoteDraft=false; only the authorized YouTube video route is automatic.
+- [ ] User-owned public product URL; owner QR/SMS login for Zhihu/Bilibili; approved Reddit provider and actual destination; permitted WeChat access and Xiaohongshu publishing route.
+
+No new external post, draft, upload or permission grant was made in this recheck. This account/documentation follow-up does not claim a fresh 187-test run; that code regression belongs to the preceding implementation checkpoint.
+
 ## Historical local acceptance
 
 - [x] Real Codex generation from a supplied source brief; exactly one valid variant per requested platform.
@@ -62,7 +74,8 @@ This scoped delivery does not complete stage one across the requested channels. 
 - [x] Independent sourced AI-agent education draft 823d5dbf-9b3f-4e3c-a7ab-edf9ca7ed317 generated through real Codex, reviewed, rendered and approved at revision 4: four PNGs and a 46.10-second H.264/AAC MP4.
 - [x] Job 78fb0a72-f850-4bd3-a48b-0f9629e4e264 submitted once; [X8dDltMseM4](https://www.youtube.com/watch?v=X8dDltMseM4) confirmed matching-channel public/processed at 06:37:59.454 UTC and Public/Published in Studio Shorts.
 - [x] Watch-page title, RadarXAI author, AI disclosure and signed-in progress to 36/46 seconds checked.
-- [ ] Full new-video player completion, subjective quality, anonymous/geographic playback and remaining-channel publication.
+- [x] 2026-10-12: refreshed official OAuth read-only channel check passed; signed-in watch page reached 46/46 seconds with Replay and the RadarXAI author. No new upload or expanded grant.
+- [ ] Subjective quality, anonymous/geographic playback and remaining-channel publication.
 
 See [replacement run](ai-agent-education-run-2026-10-10.zh-CN.md). Historical checks above describe what was observed at publication time; they do not imply the old video remains public. No broader OAuth scope or permanent deletion was performed.
 

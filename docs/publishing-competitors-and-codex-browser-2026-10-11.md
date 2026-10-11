@@ -1,6 +1,6 @@
 # 竞品与 Codex 浏览器发布报告：授权、Docker 执行与可恢复的一键发布
 
-调研更新：2026-10-11。适用项目：Content Studio。阶段一以本地 Docker、Supabase、LocalFS 为基础；阶段二仅确定迁移方案，不在本轮部署云服务。
+调研更新：2026-10-11；授权实测复验：2026-10-12。适用项目：Content Studio。阶段一以本地 Docker、Supabase、LocalFS 为基础；阶段二仅确定迁移方案，不在本轮部署云服务。
 
 本轮重新核对竞品官方说明、平台权限文档、npm 包内文档和开源执行代码。下文区分“公开资料确认”“代码确认”“工程建议”“尚未实测”，不把支持列表、上传成功、草稿同步、任务提交当作公开发布成功。本轮未安装竞品客户端、未执行下载的 CLI、未申请账号权限，也未提交新的公开内容。
 
@@ -9,6 +9,14 @@
 后续按照本报告及关联调研交付了逐账号/格式能力矩阵、Reddit Postiz self-post 契约、Product Hunt 上线资料与版本合并、知乎稿件、Bilibili 专栏分流和不可变 HTML/JSON 内容包。187 项回归、真实 Docker/Supabase 六渠道交接及指定 Chrome profile 的 Web 保存通过。详情见 [六平台升级与验收](publishing-capabilities-upgrade-2026-10-11.zh-CN.md)。
 
 这不代表 P0–P4 全部完成：完整 Postiz 自托管、WechatSync 远端草稿桥接、Docker 浏览器发布服务和新平台官方授权尚未接入；没有新的外部公开提交。下文“Docker Codex 可调用浏览器”是已研究的可实现设计，不是当前安装的运行能力。账号实测与最终注册/扫码阻塞见 [accounts](accounts.md)。
+
+### 2026-10-12 授权与浏览器复验补充
+
+Product Hunt 注册/onboarding 已完成，刷新后真实账号与产品 URL 表单仍可用，但尚无用户的真实公开产品 URL，未创建 launch。Reddit 已登录，既有 `DevPlatform Actions` 的 Submit Content 授权不等于本项目已接入获准 publisher；当前 Postiz integrations 请求明确缺少密钥。知乎和 Bilibili 专栏入口仍要求手机/App登录，微信沿用历史工具限制。
+
+小红书创作后台新增观察到 [Builder hub / Red Skill](https://creator.xiaohongshu.com/new/skill-hub)：页面描述上传 Skill 经审核后添加到笔记或评论。这是附件分发入口，没有证据证明一般笔记的第三方自动发布 API 或浏览器自动化授权。不得因为出现“Skill”字样就解除本项目发布阻塞。
+
+现有 YouTube 官方 OAuth read-only 频道检查通过，现有公开视频在指定 Chrome profile 完整播放到 46/46 秒并出现 Replay。本轮没有新发布或授权扩张；六个优先平台仍没有自动发布连接。逐项证据与所需操作见 [升级实测表](publishing-capabilities-upgrade-2026-10-11.zh-CN.md#2026-10-12-全授权指令后的实测复验)及 [账号报告](accounts.md)。
 
 ## 1. 直接结论
 

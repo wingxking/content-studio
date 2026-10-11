@@ -126,6 +126,23 @@ QA 地址为临时 `127.0.0.1:14311`，使用独立 Supabase workspace 和容器
 
 不要把密码、验证码、cookies、tokens、身份证件发到聊天或仓库。账号缺口和可恢复操作见 [accounts.md](accounts.md)。
 
+### 2026-10-12 全授权指令后的实测复验
+
+用户已授权执行测试。实际平台权限仍以账号、应用与接口验证为准；本轮验证没有产生新的公开内容、远端草稿或更广的 OAuth grant。
+
+| 检查 | 实际结果与剩余条件 |
+| --- | --- |
+| Product Hunt | 刷新后 `coding open / @coding_open` 已登录，产品 URL 表单可用且无 onboarding 提示；仍需用户自己的真实公开产品 URL/资料。当前仅 manual，automatic=false、remoteDraft=false |
+| Reddit | 刷新后仍为 `u/radarxai26`；`/prefs/apps` 的既有 `DevPlatform Actions` 显示 Submit Content 等权限，但未证明它是本项目获准 publisher。未复用/修改该授权；仍缺获准 integration、目标社区及规则/flair |
+| Postiz | 实际 integrations 请求返回 HTTP 400，明确尚未配置 `POSTIZ_API_KEY`；不是成功连接或 provider 故障 |
+| 小红书 | 创作后台为 `ziv`，草稿箱(0)与文章/视频入口可见；[Red Skill hub](https://creator.xiaohongshu.com/new/skill-hub)是审核后附加 Skill 到笔记/评论的功能，不能推导为通用自动发布许可 |
+| 知乎 | 专栏写作仍跳手机/扫码登录页；没有可用已认证身份或编辑器 |
+| Bilibili | 实际文章入口再次跳 passport 登录；没有可用 UID 或投稿权限 |
+| 微信 | 历史 Computer Use URL 禁止仍为限制，本次未重试/绕过；需管理员在允许环境核验 |
+| YouTube | 现有官方 OAuth 的 Docker read-only 检查返回预期频道；现有视频 [X8dDltMseM4](https://www.youtube.com/watch?v=X8dDltMseM4) 在同一 Chrome profile 完整播放到 46/46 秒且出现 Replay、作者 RadarXAI。未重复上传；主观质量、匿名与地域可用性未验证 |
+
+已更新四个实测账号的说明与核验时间。五个账号、六个既有发布任务、所有稿件与不可变任务快照保留；任务状态/尝试次数/远端 ID 不变，发布及 scheduler 保持暂停。六个优先平台的 automatic/remoteDraft 均为 false；YouTube 视频官方路线可用。详细操作缺口见 [账号报告](accounts.md)，本轮没有重新运行此前已通过的 187 项代码回归。
+
 ## 6. 后续实施顺序
 
 1. Product Hunt 注册/onboarding 已完成；继续完成知乎/B站扫码节点与真实身份核验，仍缺资格的渠道显示 Blocked/Needs login。

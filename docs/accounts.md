@@ -21,26 +21,34 @@ This one-off delivery container publishes only `127.0.0.1:8765:8765`; another un
 
 Local intake accepts assets up to 500 MiB. Reviewed MP4 upload remains size-bounded and streams 8 MiB chunks; explicit interrupted-upload continuation reuses the same existing session. Unknown outcomes and protected restored journals require reconciliation, never a replacement upload. The Docker-only runtime needs no host Node, Codex, Supabase CLI, macOS service or Keychain.
 
-## 六平台最新实测：2026-10-11；Product Hunt 更新至 2026-10-12
+## 六平台最新实测：2026-10-12
 
-本轮使用可见 Chrome profile `coding (radarxai@gmail.com)`。只登记直接观察到的身份；没有新的公开提交或发布 API 授权。2026-10-12 经用户当次确认后完成 Product Hunt Google Continue，仅共享页面显示的姓名、头像和邮箱。完整功能与验收见 [六平台发布能力升级](publishing-capabilities-upgrade-2026-10-11.zh-CN.md)。
+本轮使用可见 Chrome profile `coding (radarxai@gmail.com)`，刷新页面后核对登录状态。只登记直接观察到的身份；没有新的公开提交或发布 API 授权。2026-10-12 经用户当次确认后完成 Product Hunt Google Continue，仅共享页面显示的姓名、头像和邮箱。完整功能与验收见 [六平台发布能力升级](publishing-capabilities-upgrade-2026-10-11.zh-CN.md)。
 
 | 平台 | 当前实测 | 必需下一步 |
 | --- | --- | --- |
-| Reddit | 已登录，头像菜单为 `u/radarxai26` | 获准 App/provider、匹配 Postiz integration、明确测试 subreddit、当前规则与必需 flair |
+| Reddit | 刷新后仍登录 `u/radarxai26`；`/prefs/apps` 显示既有 `DevPlatform Actions` 授权，但不是已验证的本项目 publisher | 获准 App/provider、匹配 Postiz integration、明确测试 subreddit、当前规则与必需 flair |
 | Product Hunt | `coding open / @coding_open` 注册及 onboarding 已完成；三项邮件订阅取消后提交；`/posts/new` 产品 URL 表单已无 Complete onboarding 提示 | 本地 native/Connected 只表示身份及原生入口核验，能力为 manual，automatic/remoteDraft 均为 false；真实产品 URL/资料及远端草稿/上线验收待完成 |
 | 微信公众号 | 本轮未重试；历史 Computer Use 明确禁止此 URL | 由账号管理员在允许环境扫码，检查账号类型与实际发布 API 权限；不可绕过工具限制 |
 | 知乎 | `zhuanlan.zhihu.com/write` 跳到登录；没有可见 Google 入口 | 本人在已打开标签扫码/短信登录；只提供非敏感可见身份及专栏权限 |
-| 小红书 | 已登录创作后台，显示 `ziv`、图文/视频入口 | 核对账号内容资格、AI 声明及获准路线；保持已有权限阻塞，登录不等于自动发布许可 |
+| 小红书 | 刷新后创作后台仍为 `ziv`，视频/图文/长文入口与草稿箱(0)可见；Red Skill 是审核后添加到笔记/评论的附件功能 | 核对账号内容资格、AI 声明及获准路线；保持已有权限阻塞，登录不等于自动发布许可 |
 | Bilibili | 创作中心跳到 passport 登录，没有可见 Google 入口 | 本人在已打开标签扫码/短信登录，再核对 UID、专栏/视频投稿权限 |
 
 Google 邮箱不能替代中国平台的手机/管理员身份验证。2026-10-12 用户依次确认 Google Continue、年龄声明与取消三项邮件订阅后，已点击 Get Started，进入第 2/2 步并跳过可选个人资料，再继续进入已登录首页；未添加 LinkedIn/X 资料或关注推荐账号。重新打开 `/posts/new` 后只显示产品 URL 表单，Complete onboarding 提示消失。`coding open (@coding_open)` 的既有账号更新为 native/Connected；实际能力为 manual，automatic=false、remoteDraft=false，未获得发布 API 权限，未创建远端草稿或公开 launch。仍缺真实公开产品 URL 和上线资料；六个既有发布任务状态、尝试次数、远端 ID 不变，发布保持暂停。新密码、验证码、恢复码和私有会话不得发到聊天。知乎/B站完成登录后回复「已登录」及可见用户名即可继续核验。
+
+### 2026-10-12 实际接口与播放器复验
+
+- `GET /api/youtube/status` 由 Docker delivery worker 调用现有官方 OAuth，返回 `available=true` 和预期频道 `UCVUtH6reLkEuMrUuTh-XgjQ`。同一 Chrome profile 中，现有视频 [X8dDltMseM4](https://www.youtube.com/watch?v=X8dDltMseM4) 显示 RadarXAI 作者，播放器到达 **46/46 秒、Replay**；本次没有新增授权或上传。
+- `GET /api/publishing/integrations` 实际返回 HTTP 400，明确缺少 `POSTIZ_API_KEY`。这属于尚未配置，不能当成 provider 故障，也不能把其他应用的既有 Reddit 授权当作本项目凭证。[Reddit 当前 Builder Policy](https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy)要求对应的获准访问；未撤销或复用 `DevPlatform Actions`。
+- [小红书 Red Skill 页面](https://creator.xiaohongshu.com/new/skill-hub)说明上传 Skill 审核通过后可添加到笔记或评论；页面没有证明一般笔记自动发布 API、写权限或对第三方自动化的许可。未上传 Skill、素材或稿件。
+- 知乎专栏仍跳登录，Bilibili 实际文章入口 `https://member.bilibili.com/platform/upload/text` 再次跳 passport 登录。微信入口沿用历史工具限制，本次没有重试或绕过。Product Hunt `/posts/new` 刷新后仍已登录且无 onboarding 提示，仍缺真实产品网址。
+- 已更新四个实测账号的说明和核验时间。五个账号及六个既有任务保留，稿件与任务快照完全不变，状态/尝试次数/远端 ID 不变；发布暂停、两个 scheduler 保持禁用。六个优先平台的 `automatic` 和 `remoteDraft` 都为 false，YouTube 视频路线为已接入官方 API。
 
 ## Latest four-account verification: 2026-10-10
 
 The user completed registration/login. In Chrome profile `coding (radarxai@gmail.com)`, current native UI checks confirmed X `@radarxai`, YouTube `RadarXAI` with channel `UCVUtH6reLkEuMrUuTh-XgjQ`, Xiaohongshu `ziv` with account `63520392304`, and Reddit `u/radarxai26`. This supersedes the earlier registration blockers below; it does not establish OAuth or automated publishing permission. The new AI-agent education video is public; the previous topic was reversibly withdrawn to Private. X, Reddit and Xiaohongshu remain unsubmitted.
 
-- YouTube: the existing dedicated Desktop AI-agent client in radar-511204, sole External Testing user and exact upload/read-only grant are complete. Official API verified channel UCVUtH6reLkEuMrUuTh-XgjQ. Old job 489d1309-02d4-47e8-9d0b-3a9fba52b864 submitted revision 7 once; at the owner's request, video aKaJ3qBAhCc was set to Private and saved in Studio, with official private/processed readback at 06:36:33.598 UTC. The old draft is now revision 8 with approval revoked. New draft 823d5dbf-9b3f-4e3c-a7ab-edf9ca7ed317 revision 4 was submitted once through job 78fb0a72-f850-4bd3-a48b-0f9629e4e264; video X8dDltMseM4 is confirmed public/processed at 06:37:59.454 UTC and Public/Published in Studio Shorts. [Current video](https://www.youtube.com/watch?v=X8dDltMseM4). The signed-in player reached 36/46 seconds; full playback remains pending. Existing scopes returned 403 insufficientPermissions for videos.update; no broader grant was made. Credentials and journals remain private. No paid trial was started.
+- YouTube: the existing dedicated Desktop AI-agent client in radar-511204, sole External Testing user and exact upload/read-only grant are complete. Official API verified channel UCVUtH6reLkEuMrUuTh-XgjQ. Old job 489d1309-02d4-47e8-9d0b-3a9fba52b864 submitted revision 7 once; at the owner's request, video aKaJ3qBAhCc was set to Private and saved in Studio, with official private/processed readback at 06:36:33.598 UTC. The old draft is now revision 8 with approval revoked. New draft 823d5dbf-9b3f-4e3c-a7ab-edf9ca7ed317 revision 4 was submitted once through job 78fb0a72-f850-4bd3-a48b-0f9629e4e264; video X8dDltMseM4 is confirmed public/processed at 06:37:59.454 UTC and Public/Published in Studio Shorts. [Current video](https://www.youtube.com/watch?v=X8dDltMseM4). The signed-in player initially reached 36/46 seconds; the 2026-10-12 recheck reached 46/46 seconds with Replay. Subjective quality and anonymous/geographic playback remain separate. Existing scopes returned 403 insufficientPermissions for videos.update; no broader grant was made. Credentials and journals remain private. No paid trial was started.
 - X: the withdrawn trend draft must not be republished. The new education draft is editorial and can use a rule-compliant official API route, but no X API/Postiz publisher is configured. Configure approved developer/user authorization or an authorized Postiz integration locally; do not send secret values to chat. Website automation remains prohibited.
 - Reddit: current App/AI-agent policy requires registration and approved access. No approved app, API credentials, or human/App identity separation is configured. Prepare the personal-profile version; a genuine human may review and publish manually.
 - Xiaohongshu: creator access is available, but no approved general personal-note publishing API is configured. The current User Agreement §4.1 restricts unauthorized third-party tools, and Community Rules §4.4.3 includes machine publishing among abnormal publishing modes. Visible Codex operation has no stated exemption. The approved caption and four cards are ready for a genuine owner review and final native Publish click, subject to platform review. The Nobel Peace/ICC/ICJ note was withdrawn and must not be published. The replacement adult AI/coding practice avoids that topic, but its account-specific professional-content classification has not been established; do not infer either a blanket license requirement or exemption. Seek an account-specific qualification answer and approved integration or written authorization before promising automatic publication.
