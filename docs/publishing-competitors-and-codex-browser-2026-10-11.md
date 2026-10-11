@@ -4,6 +4,12 @@
 
 本轮重新核对竞品官方说明、平台权限文档、npm 包内文档和开源执行代码。下文区分“公开资料确认”“代码确认”“工程建议”“尚未实测”，不把支持列表、上传成功、草稿同步、任务提交当作公开发布成功。本轮未安装竞品客户端、未执行下载的 CLI、未申请账号权限，也未提交新的公开内容。
 
+## 本轮实施状态：2026-10-11
+
+后续按照本报告及关联调研交付了逐账号/格式能力矩阵、Reddit Postiz self-post 契约、Product Hunt 上线资料与版本合并、知乎稿件、Bilibili 专栏分流和不可变 HTML/JSON 内容包。187 项回归、真实 Docker/Supabase 六渠道交接及指定 Chrome profile 的 Web 保存通过。详情见 [六平台升级与验收](publishing-capabilities-upgrade-2026-10-11.zh-CN.md)。
+
+这不代表 P0–P4 全部完成：完整 Postiz 自托管、WechatSync 远端草稿桥接、Docker 浏览器发布服务和新平台官方授权尚未接入；没有新的外部公开提交。下文“Docker Codex 可调用浏览器”是已研究的可实现设计，不是当前安装的运行能力。账号实测与最终注册/扫码阻塞见 [accounts](accounts.md)。
+
 ## 1. 直接结论
 
 **可以让 Docker 中的 Codex 调用容器内浏览器，登录后上传素材、填写内容和执行发布。**实现方式是 Linux Codex CLI/App Server + MCP 工具 + 独立浏览器服务，而不是把 Mac 桌面的 Computer Use 插件搬进容器。首次扫码、短信、双重验证和后续风控验证仍可能需要本人接管；已有 Mac Chrome 登录不会自动进入 Docker。

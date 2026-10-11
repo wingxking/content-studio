@@ -25,7 +25,7 @@ export async function doctor(): Promise<Record<string, unknown>> {
   const schedulerReady = z.object({ ready: z.boolean() }).safeParse(scheduler);
   return { scheduler, schedulerReady: schedulerReady.success && schedulerReady.data.ready, stage: 1, requiredGoogleAccount: 'radarxai@gmail.com', codexAvailable, codexPath, modelCount: models.length,
     modelRunner, roleOperations, runtime: process.env.STUDIO_CONTAINER === 'true' ? 'docker' : 'migration-native', codexAuthentication: 'Container login readiness and a real model task are separate checks.', storage: 'localfs', database: storage, dataDirectory: dataDirectory(), stateReadable, localWritable, stateError, paused, connectedAccounts, localServices,
-    postizConfigured: Boolean(process.env.POSTIZ_API_KEY), automaticTextPlatforms: process.env.POSTIZ_API_KEY ? ['x (非热点)', 'linkedin'] : [],
+    postizConfigured: Boolean(process.env.POSTIZ_API_KEY), automaticTextPlatforms: process.env.POSTIZ_API_KEY ? ['x (非热点)', 'linkedin', 'reddit (已获准应用及社区目标)'] : [],
     sourceDiscovery: '统一一次/每天/每周任务，研究真实来源，最多 20 个有来源的选题；不声称全球热度排名。',
     youtubePublishing: '授权的 YouTube API + 持久上传记录；先手动制作真实视频，再点击发布。',
     xPolicy: '热点相关的 X 内容交由账号所有者在原生页面发布。',

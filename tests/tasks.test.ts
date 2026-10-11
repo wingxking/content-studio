@@ -9,7 +9,7 @@ import { listModels } from '../src/core/models.ts';
 import { extractSourceText, isPublicAddress, researchSources, validateSourceUrl } from '../src/core/research.ts';
 import { classifyCodexFailure, codexOutputSchema, runStructuredGeneration } from '../src/core/generation-engine.ts';
 import { configureTaskRuntime, getTaskRun, processTaskRun, readRunArtifact } from '../src/core/tasks.ts';
-import { briefSchema, emptyState } from '../src/core/model.ts';
+import { variantSchema, briefSchema, emptyState } from '../src/core/model.ts';
 import { discoveryPromptInputSchema } from '../src/core/content-prompts.ts';
 
 const env = { ...process.env }; const fetcher = globalThis.fetch; let directory = '';
@@ -44,6 +44,24 @@ test('Codex wire schema strips unsupported uri format while local URL validation
   const schema = z.object({ url: z.url(), id: z.uuid() }); const wire = JSON.stringify(codexOutputSchema(schema));
   assert.doesNotMatch(wire, /\"format\":\"uri\"/); assert.match(wire, /\"format\":\"uuid\"/);
   assert.throws(() => schema.parse({ url: 'invalid', id: '25d6c0eb-c646-435f-86a6-1d6dd9e759f2' }));
+});
+test('local Codex accepts required nullable variant wire fields and restores optional domain fields', async () => {
+  delete process.env.STUDIO_MODEL_EXECUTOR_URL;
+  await fakeCodex(`const fs=require('node:fs');const args=process.argv.slice(2);const schema=JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema')+1],'utf8'));if(!schema.required.includes('launch')||!schema.required.includes('format'))process.exit(1);fs.writeFileSync(args[args.indexOf('-o')+1],JSON.stringify({platform:'zhihu',title:'Source-backed article',text:'Supported facts.',tags:[],mediaPaths:[],format:'article',launch:null}));`);
+  const result = await runStructuredGeneration(variantSchema, 'Create local article only.');
+  assert.equal(result.format, 'article'); assert.equal(Object.hasOwn(result, 'launch'), false);
+});
+test('remote model execution uses the same nullable wire and strict domain normalization', async () => {
+  process.env.STUDIO_MODEL_EXECUTOR_URL = 'http://127.0.0.1:8910';
+  globalThis.fetch = async (_input, init) => {
+    const request = JSON.parse(String(init?.body)) as { schema: { required: string[] } };
+    assert.ok(request.schema.required.includes('format')); assert.ok(request.schema.required.includes('launch'));
+    return Response.json({ result: { platform: 'bilibili', title: 'Article', text: 'Source-backed facts.', tags: [], mediaPaths: [], format: 'article', launch: null } });
+  };
+  const result = await runStructuredGeneration(variantSchema, 'Create local article only.');
+  assert.equal(result.platform, 'bilibili'); assert.equal(Object.hasOwn(result, 'launch'), false);
+  globalThis.fetch = async () => Response.json({ result: { platform: 'bilibili', title: null, text: 'Facts.', tags: [], mediaPaths: [], format: null, launch: null } });
+  await assert.rejects(runStructuredGeneration(variantSchema, 'Malformed required fields must fail.'));
 });
 test('model catalog exposes only allowed public metadata', async () => {
   const file = join(directory, 'models_cache.json'); await writeFile(file, JSON.stringify({ secret: 'not-returned', models: [{ slug: 'model-test', display_name: 'Test model', description: 'Description', sensitive: 'not-returned' }] }));
@@ -83,6 +101,8 @@ test('Codex failure classification exposes no raw server message or credentials'
   assert.doesNotMatch(classifyCodexFailure(secretMessage) ?? '', /secret-token|private URL/);
   assert.match(classifyCodexFailure('stream disconnected before completion') ?? '', /reach its service/);
   assert.equal(classifyCodexFailure('Unclassified details'), null);
+  assert.match(classifyCodexFailure('invalid_json_schema with secret-token') ?? '', /structured output schema/);
+  assert.doesNotMatch(classifyCodexFailure('invalid_json_schema with secret-token') ?? '', /secret-token/);
 });
 test('structured engine cancellation kills a running child promptly', async () => {
   await fakeCodex(`setInterval(()=>{},1000);`); const controller = new AbortController(); const started = Date.now(); setTimeout(() => controller.abort(), 100);

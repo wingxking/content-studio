@@ -22,3 +22,13 @@ test('uploaded media is identified by bytes, not a misleading extension', () => 
   assert.throws(() => detectMedia(Buffer.from('<script>fake image</script>')), /media|PNG|JPEG|WebP/i);
   assert.equal(detectMedia(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])).mime, 'image/png');
 });
+
+test('Product Hunt master synchronization updates untouched launch data and protects manual launch edits', () => {
+  const launch = { url: 'https://product.example/', name: 'Product', tagline: 'Original tagline', description: 'Original description', firstComment: 'Original maker comment' };
+  const before: Variant = { ...base, platform: 'producthunt', format: 'product_launch', launch };
+  const incoming: Variant = { ...before, launch: { ...launch, description: 'Updated description' } };
+  assert.deepEqual(mergeAdaptation(before, before, incoming).variant.launch, incoming.launch);
+  const local: Variant = { ...before, launch: { ...launch, firstComment: 'Personally edited maker comment' } };
+  const result = mergeAdaptation(before, local, incoming);
+  assert.deepEqual(result.variant.launch, local.launch); assert.ok(result.conflicts.includes('producthunt.launch'));
+});

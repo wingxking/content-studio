@@ -2,6 +2,21 @@
 
 Date: 2026-10-10, Asia/Singapore. The latest scope accepts a complete local application with automatic publishing where authorized and actionable native publishing handoff elsewhere. Local application acceptance and live acceptance of each channel are separate. Cloud work remains feasibility and architecture only. Current implementation and executable acceptance are recorded in [local system delivery](local-system-delivery.zh-CN.md).
 
+## Latest six-platform upgrade: 2026-10-11
+
+- [x] Strict TypeScript and production build passed; 187 tests passed with zero failures.
+- [x] Real Docker API/Supabase isolated workspace: six platform variants and native handoff jobs; immutable Product Hunt fields, safe HTML downloads, Bilibili article route, repeated-batch deduplication, capability blockers, Origin protection and rejected editor receipt passed.
+- [x] Actual Linux Codex generated a 453-character master and 465-character Zhihu/Bilibili article variants with source links; fixed required/nullable output schema compatibility and added direct/remote validation regression.
+- [x] Chrome profile `coding (radarxai@gmail.com)` verified; six-platform capability view and video-format exclusions checked.
+- [x] Product Hunt fields edited and saved in Web (r1→r2); the old publication snapshot retained r1 fields. All six QA deliveries remained `awaiting_operator`, zero attempts and no remote IDs.
+- [x] Fresh Reddit `u/radarxai26` and Xiaohongshu `ziv` login checked; Product Hunt stopped at final Google Continue/terms; Zhihu and Bilibili require owner QR/SMS login.
+- [ ] Live Reddit approved API/provider integration and destination acceptance.
+- [ ] Product Hunt actual personal onboarding and real-product launch/draft acceptance.
+- [ ] WeChat, Zhihu, Xiaohongshu and Bilibili account-specific remote draft/submission/public visibility acceptance.
+- [ ] Docker browser publishing bridge and WechatSync draft adapter are not implemented; existing Docker Codex execution is content generation.
+
+See [upgrade implementation and blockers](publishing-capabilities-upgrade-2026-10-11.zh-CN.md). No new live external content was submitted in this upgrade. Earlier native and Docker channel evidence is preserved below.
+
 ## Historical local acceptance
 
 - [x] Real Codex generation from a supplied source brief; exactly one valid variant per requested platform.

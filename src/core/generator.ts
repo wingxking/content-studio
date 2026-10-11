@@ -1,3 +1,4 @@
+import { codexOutputSchema, parseStructuredOutput } from './structured-output.ts';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -73,12 +74,12 @@ export async function generateContent(input: Brief): Promise<Generated> {
   try {
     const schemaPath = join(directory, 'output-schema.json');
     const resultPath = join(directory, 'result.json');
-    await writeFile(schemaPath, JSON.stringify(z.toJSONSchema(generationEnvelopeSchema)), { mode: 0o600 });
+    await writeFile(schemaPath, JSON.stringify(codexOutputSchema(generationEnvelopeSchema)), { mode: 0o600 });
     await runCodex(binary, directory, schemaPath, resultPath, buildArticlePrompt(brief));
     const info = await stat(resultPath).catch(() => { throw new Error('Codex completed without an output artifact. Verify structured-output support in this CLI version.'); });
     if (info.size > 2000000) throw new Error('Generated artifact exceeded the 2 MB limit.');
     let envelope: z.infer<typeof generationEnvelopeSchema>;
-    try { envelope = generationEnvelopeSchema.parse(JSON.parse(await readFile(resultPath, 'utf8'))); }
+    try { envelope = parseStructuredOutput(generationEnvelopeSchema, JSON.parse(await readFile(resultPath, 'utf8')) as unknown); }
     catch { throw new Error('Codex output failed the editorial assessment or content schema. No draft was saved; retry generation with a clearer brief.'); }
     if (envelope.assessment.status !== 'allowed') throw new Error(`Editorial assessment is ${envelope.assessment.status}. No draft was saved; choose a clearly permitted, supported topic.`);
     if (envelope.content === null) throw new Error('Allowed editorial assessment omitted content. No draft was saved.');

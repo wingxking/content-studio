@@ -118,7 +118,7 @@ export async function cancelOperation(id: string): Promise<Operation> {
 export function mergeAdaptation(base: Variant | undefined, local: Variant, incoming: Variant): { variant: Variant; conflicts: string[]; baseline: Variant | undefined } {
   const result = { ...local }; const conflicts: string[] = [];
   const baseline = base ? { ...incoming, mediaPaths: local.mediaPaths } : undefined;
-  for (const key of ['title', 'text', 'tags'] as const) {
+  for (const key of ['title', 'text', 'tags', 'format', 'launch'] as const) {
     if (base && same(local[key], base[key])) Object.assign(result, { [key]: incoming[key] });
     else if (!same(local[key], incoming[key])) {
       conflicts.push(`${local.platform}.${key}`);
@@ -174,7 +174,7 @@ export async function attachVideo(id: string, expectedRevision: number): Promise
   if (video.status !== 'ready' || video.renderedRevision !== video.revision || !video.mediaPaths.length) throw new Error('Render and review the current video script before attaching it.');
   const draft = await currentDraft(video.draftId);
   if (!draft.variants.some(variant => variant.platform === video.platform)) throw new Error('This draft has no publishing version for the video platform. Create the target version first.');
-  return saveEditedDraft(draft.id, { ...draft, variants: draft.variants.map(item => item.platform === video.platform ? { ...item, mediaPaths: video.mediaPaths } : item) }, expectedRevision);
+  return saveEditedDraft(draft.id, { ...draft, variants: draft.variants.map(item => item.platform === video.platform ? { ...item, format: 'video', mediaPaths: video.mediaPaths } : item) }, expectedRevision);
 }
 export async function requestVideoRender(id: string): Promise<Operation> {
   const video = await getVideo(id);
@@ -261,7 +261,7 @@ export async function handleStudioOperation(id: string, parentSignal: AbortSigna
       const meta = await editorMeta(draft); const variants: Variant[] = []; const conflicts: string[] = []; const baselines: Variant[] = [];
       for (const local of draft.variants) {
         await patch({ phase: `Adapting ${local.platform}` });
-        const incoming = await adaptMaster(draft.brief, { title: draft.title, body: draft.body }, local.platform, `${instruction}\nAdapt the revised master, preserve its cited facts and practical value. Keep the original destination and audience; do not publish or create media.`, options);
+        const incoming = await adaptMaster(draft.brief, { title: draft.title, body: draft.body }, local.platform, `${instruction}\nExisting product launch facts supplied by the owner (do not invent or treat as verified metrics): ${JSON.stringify(local.launch ?? null)}\nAdapt the revised master, preserve its cited facts and practical value. Keep the original destination and audience; do not publish or create media.`, options);
         const merged = mergeAdaptation(meta.baselines.find(item => item.platform === local.platform), local, incoming);
         variants.push(merged.variant); conflicts.push(...merged.conflicts);
         if (merged.baseline) baselines.push(merged.baseline);

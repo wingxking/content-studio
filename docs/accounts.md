@@ -21,6 +21,21 @@ This one-off delivery container publishes only `127.0.0.1:8765:8765`; another un
 
 Local intake accepts assets up to 500 MiB. Reviewed MP4 upload remains size-bounded and streams 8 MiB chunks; explicit interrupted-upload continuation reuses the same existing session. Unknown outcomes and protected restored journals require reconciliation, never a replacement upload. The Docker-only runtime needs no host Node, Codex, Supabase CLI, macOS service or Keychain.
 
+## 六平台最新实测：2026-10-11
+
+本轮使用可见 Chrome profile `coding (radarxai@gmail.com)`。只登记直接观察到的身份；没有新的公开提交或 API 授权。完整功能与验收见 [六平台发布能力升级](publishing-capabilities-upgrade-2026-10-11.zh-CN.md)。
+
+| 平台 | 当前实测 | 必需下一步 |
+| --- | --- | --- |
+| Reddit | 已登录，头像菜单为 `u/radarxai26` | 获准 App/provider、匹配 Postiz integration、明确测试 subreddit、当前规则与必需 flair |
+| Product Hunt | 已选择指定 Google 账号，停在 Continue；未确认注册成功 | 本次最终注册条款确认，然后完成个人账号 onboarding；真实产品 URL/名称/资料，不把新闻作为产品 |
+| 微信公众号 | 本轮未重试；历史 Computer Use 明确禁止此 URL | 由账号管理员在允许环境扫码，检查账号类型与实际发布 API 权限；不可绕过工具限制 |
+| 知乎 | `zhuanlan.zhihu.com/write` 跳到登录；没有可见 Google 入口 | 本人在已打开标签扫码/短信登录；只提供非敏感可见身份及专栏权限 |
+| 小红书 | 已登录创作后台，显示 `ziv`、图文/视频入口 | 核对账号内容资格、AI 声明及获准路线；保持已有权限阻塞，登录不等于自动发布许可 |
+| Bilibili | 创作中心跳到 passport 登录，没有可见 Google 入口 | 本人在已打开标签扫码/短信登录，再核对 UID、专栏/视频投稿权限 |
+
+Google 邮箱不能替代中国平台的手机/管理员身份验证。Computer Use 确认规则要求在实际接受新账号条款前再次确认；本轮 Product Hunt 最终动作已留待回应。新密码、验证码、恢复码和私有会话不得发到聊天。完成登录后回复「已登录」及可见用户名即可继续核验。
+
 ## Latest four-account verification: 2026-10-10
 
 The user completed registration/login. In Chrome profile `coding (radarxai@gmail.com)`, current native UI checks confirmed X `@radarxai`, YouTube `RadarXAI` with channel `UCVUtH6reLkEuMrUuTh-XgjQ`, Xiaohongshu `ziv` with account `63520392304`, and Reddit `u/radarxai26`. This supersedes the earlier registration blockers below; it does not establish OAuth or automated publishing permission. The new AI-agent education video is public; the previous topic was reversibly withdrawn to Private. X, Reddit and Xiaohongshu remain unsubmitted.
@@ -60,9 +75,15 @@ The four-account verification above supersedes the earlier Reddit, YouTube, X an
 
 ## Postiz adapter
 
-An API key is not a Google registration credential. Sign in to a hosted or existing approved Postiz installation, connect the intended X or LinkedIn account, and configure its API key locally through the environment/OS secret store. Query integrations using the documented API; enter the exact integration ID into the workbench. The adapter verifies the integration exists, is enabled and matches the selected platform before submission. No Postiz subscription or billing upgrade was purchased.
+An API key is not a Google registration credential. Sign in to a hosted or existing approved Postiz installation, connect the intended X, LinkedIn or approved Reddit account, and configure its API key locally through the environment/OS secret store. Query integrations using the documented API; enter the exact integration ID into the workbench. The adapter verifies the integration exists, is enabled and matches the selected platform before submission. No Postiz subscription or billing upgrade was purchased.
 
 Registering native metadata as Connected alone records an operator check, not an automatically tested OAuth credential. YouTube is now Connected based on the real official OAuth grant, exact channel readback and published video. The other three current accounts remain Blocked with their verified identities and policy/access tasks; login is not publisher authorization. Use Needs login or Blocked until the creator page and visible account identity have actually been checked. Existing account metadata must be updated when login is renewed; do not create duplicate account entries to bypass a blocker.
+
+### Reddit Postiz configuration
+
+The expanded adapter supports approved Reddit self posts with one explicit community. Configure `POSTIZ_API_KEY` privately in the Docker root's ignored `config/application.env`, use the intended approved provider URL, restart through the Docker lifecycle, then query integrations in Web. Choose the exact Reddit integration ID, review the actual community rules URL, record non-sensitive App approval evidence, and supply required flair. The evidence field is an operator declaration, not an automated platform-approval lookup. The seven-day rule-review gate is a project guard, not an official Reddit time limit.
+
+Connection checks preserve Blocked; they never authorize a previously blocked route. A changed community/target invalidates prior approval. The implementation has passed documented payload and local recovery tests, but no live Postiz key, integration or Reddit submission was configured in this upgrade. Full Postiz self-hosting and WechatSync remote draft sync are not installed.
 
 ## Official YouTube onboarding
 
@@ -77,9 +98,11 @@ Current onboarding is complete: the dedicated Desktop AI-agent client exists in 
 
 External Testing grants containing YouTube scopes and their refresh tokens expire after seven days; reauthorization is needed for a continuing test. Upload plus read-only is the minimum pair used here for upload, exact channel verification, and private/processing readback. These scopes must be reviewed on the actual consent screen. Approval, client creation, user grant, and a real public video remain separate milestones. Official setup references: [consent configuration](https://developers.google.com/workspace/guides/configure-oauth-consent), [client and AI-agent designation](https://support.google.com/cloud/answer/15549257?hl=en), [Testing restrictions](https://support.google.com/cloud/answer/15549945?hl=en). The private local uploader is limited to reviewed MP4s up to 512 MiB; it does not stream unlimited files or automatically resend partial uploads.
 
-## Current local Supabase setup
+## Historical native Supabase setup
 
-The complete local product now uses the dedicated Supabase CLI project `content-studio-local`: API 55421 and Postgres 55422, both bound to loopback. Docker, database/Auth/private Storage, pgmq and pg_cron have been exercised on this Mac. Migrations 001–006 are applied. Server-only runtime values stay in ignored `.studio/runtime.env`; the browser never receives the service-role key.
+The supported current runtime is Compose Supabase, API `56421`, PostgreSQL `56422`, Web `14310`; use `sh scripts/docker.sh start --root /absolute/private-root`. The native CLI instructions below are retained only for historical migration/recovery.
+
+The earlier local product used the dedicated Supabase CLI project `content-studio-local`: API 55421 and Postgres 55422, both bound to loopback. Docker, database/Auth/private Storage, pgmq and pg_cron have been exercised on this Mac. Migrations 001–006 are applied. Server-only runtime values stay in ignored `.studio/runtime.env`; the browser never receives the service-role key.
 
 Use `npm run local:setup`, `npm run local:start` and `npm run local:status`; see [local system delivery](local-system-delivery.zh-CN.md) for acceptance and backup/restore. The existing hosted `radar` project is not the application's database and was not modified. Hosted Supabase selection and cloud production deployment remain stage two. Earlier observations that the local Docker daemon was unavailable are historical and have been superseded by this running installation.
 

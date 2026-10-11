@@ -1,8 +1,10 @@
 # Shared content prompts and project skill
 
-Guidance version: 2026-10-10. Evidence and platform-specific limits: [research report](content-growth-guidance.md). Skill: [.agents/skills/content-editorial/SKILL.md](../.agents/skills/content-editorial/SKILL.md). Project instructions route content work to this skill.
+Guidance version: 2026-10-12. Added Product Hunt product-launch facts, Zhihu articles and explicit Bilibili article format; see [publishing upgrade](publishing-capabilities-upgrade-2026-10-11.zh-CN.md). Evidence and platform-specific limits: [research report](content-growth-guidance.md). Skill: [.agents/skills/content-editorial/SKILL.md](../.agents/skills/content-editorial/SKILL.md). Project instructions route content work to this skill.
 
-## Implemented integration
+## Initial integration scope (historical)
+
+The table below records the initial prompt-only revision. Current Docker workers execute discovery, master/variant generation, merge-aware refinement and explicit video workflows; see [Docker runtime acceptance](docker-runtime.md).
 
 `src/core/content-prompts.ts` is the shared policy source. It provides one editorial policy and a typed profile for every current platform ID. Requested destinations receive their own profile; all modes receive the same topic exclusions, source rules and anti-manipulation guidance.
 

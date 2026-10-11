@@ -1,3 +1,8 @@
+import { checkAccountConnection } from '../core/pipeline.ts';
+import { articlePackageHtml } from '../core/article-package.ts';
+import { publishingCapabilities } from '../core/publishing-capabilities.ts';
+import { listIntegrations } from '../core/postiz.ts';
+import { expectedYouTubeChannelId } from '../core/youtube.ts';
 import { createStreamingAssetRouter, createUploadRouter } from './uploads.ts';
 import express, { type ErrorRequestHandler } from 'express';
 import { readFile, realpath, rm, stat } from 'node:fs/promises';
@@ -60,6 +65,10 @@ app.post('/api/drafts/:id/media', async (req, res) => {
     throw error;
   }
 });
+app.get('/api/schemas/content', (_req, res) => res.json(z.toJSONSchema(z.object({ brief: briefSchema, content: generatedSchema }))));
+app.get('/api/publishing/capabilities', async (_req, res) => res.json(publishingCapabilities((await readState()).accounts, { postizConfigured: Boolean(process.env.POSTIZ_API_KEY), expectedYoutubeChannel: expectedYouTubeChannelId })));
+app.get('/api/publishing/integrations', async (_req, res) => res.json(await listIntegrations()));
+app.post('/api/accounts/:id/check', async (req, res) => res.json(await checkAccountConnection(z.uuid().parse(req.params.id))));
 app.post('/api/accounts', async (req, res) => res.json(await addAccount(accountSchema.omit({ id: true }).parse(req.body))));
 app.put('/api/accounts/:id', async (req, res) => res.json(await updateAccount(z.uuid().parse(req.params.id), accountSchema.omit({ id: true }).parse(req.body))));
 app.post('/api/jobs', async (req, res) => res.json(await scheduleJob(z.object({ draftId: z.uuid(), accountId: z.uuid(), scheduledAt: z.iso.datetime() }).parse(req.body))));
@@ -69,6 +78,7 @@ app.post('/api/jobs/:id/cancel', async (req, res) => res.json(await cancelJob(z.
 app.post('/api/jobs/:id/reconcile', async (req, res) => res.json(await createDeliveryRecoveryOperation(z.uuid().parse(req.params.id), 'reconcile')));
 app.post('/api/jobs/:id/receipt', async (req, res) => { const input = z.object({ remoteUrl: z.url(), remoteId: z.string().min(1).max(500) }).parse(req.body); res.json(await confirmPublication(z.uuid().parse(req.params.id), input.remoteUrl, input.remoteId)); });
 app.post('/api/jobs/:id/metrics', async (req, res) => { const input = z.object({ views: z.number().nonnegative().nullable(), likes: z.number().nonnegative().nullable(), comments: z.number().nonnegative().nullable(), clicks: z.number().nonnegative().nullable(), notes: z.string().max(2000) }).parse(req.body); res.json(await recordMetrics(z.uuid().parse(req.params.id), input)); });
+app.get('/api/jobs/:id/article.html', async (req, res) => { const job = (await readState()).jobs.find(item => item.id === z.uuid().parse(req.params.id)); if (!job?.snapshot || job.subject?.kind === 'video') throw new Error('An immutable article snapshot is required.'); res.setHeader('Content-Disposition', `attachment; filename="${job.id}.html"`); res.type('html').send(articlePackageHtml(job.snapshot.variant)); });
 app.get('/api/jobs/:id/export', async (req, res) => { const job = (await readState()).jobs.find(item => item.id === z.uuid().parse(req.params.id)); if (!job) throw new Error('Publication not found.'); res.setHeader('Content-Disposition', `attachment; filename="${job.id}.json"`); res.json({ job, ...job.snapshot }); });
 app.get('/api/media', async (req, res) => {
   const path = await realpath(await resolveMediaLocation(z.string().parse(req.query.path))); if (!await isManagedMediaPath(path)) { res.status(403).end(); return; }
@@ -76,7 +86,7 @@ app.get('/api/media', async (req, res) => {
   res.setHeader('Content-Disposition', `inline; filename="${basename(path).replace(/[^\w.-]/g, '_')}"`); res.sendFile(path, { dotfiles: 'allow' });
 });
 app.get('/api/docs/:name', async (req, res) => {
-  const name = z.enum(['research', 'accounts', 'architecture', 'acceptance', 'web-product-design.zh-CN', 'web-technical-architecture.zh-CN', 'research-web-workflows-2026-10-10.zh-CN', 'local-system-delivery.zh-CN']).parse(req.params.name);
+  const name = z.enum(['research', 'accounts', 'architecture', 'acceptance', 'web-product-design.zh-CN', 'web-technical-architecture.zh-CN', 'research-web-workflows-2026-10-10.zh-CN', 'local-system-delivery.zh-CN', 'publishing-capabilities-upgrade-2026-10-11.zh-CN', 'publishing-competitors-and-codex-browser-2026-10-11']).parse(req.params.name);
   res.type('text/markdown').send(await readFile(resolve('docs', `${name}.md`), 'utf8'));
 });
 const errors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {

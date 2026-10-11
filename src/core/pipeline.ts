@@ -1,3 +1,4 @@
+import { validateLaunchVariant } from './publishing-capabilities.ts';
 import { resolveAssetPath } from './assets.ts';
 import type { ArticleNode } from './article-document.ts';
 import { canonicalArticle, documentFromText } from './article-document.ts';
@@ -85,16 +86,17 @@ async function draftHash(draft: Draft): Promise<string> {
   return digest({ revision: draft.revision, title: draft.title, body: draft.body, ...(draft.document ? { document: draft.document, documentAssets } : {}), brief: draft.brief, variants: draft.variants, media });
 }
 function targetHash(draft: Draft, variant: Variant, account: Account): string {
-  return digest({ draftApproval: draft.approvedHash, variant, accountId: account.id, platform: account.platform, provider: account.provider, integrationId: account.integrationId, label: account.label });
+  return digest({ draftApproval: draft.approvedHash, variant, accountId: account.id, platform: account.platform, provider: account.provider, integrationId: account.integrationId, label: account.label, ...(account.reddit ? { reddit: account.reddit } : {}) });
 }
 async function contentKey(variant: Variant, account: Account): Promise<string> {
   const mediaHashes = await Promise.all(variant.mediaPaths.map(async path => (await mediaInfo(path)).hash));
   const content = account.provider === 'postiz' ? canonicalPostizContent(variant) : { title: variant.title, text: variant.text, tags: variant.tags };
-  return digest({ content, mediaHashes, accountId: account.id, platform: account.platform, provider: account.provider, integrationId: account.integrationId });
+  return digest({ content, mediaHashes, accountId: account.id, platform: account.platform, provider: account.provider, integrationId: account.integrationId, ...(variant.format ? { format: variant.format } : {}), ...(account.platform === 'reddit' ? { title: variant.title, reddit: account.reddit } : {}), ...(variant.launch ? { launch: variant.launch } : {}) });
 }
 async function validateMedia(variant: Variant): Promise<void> {
+  validateLaunchVariant(variant);
   const files = await Promise.all(variant.mediaPaths.map(mediaInfo));
-  if (videoPlatforms.has(variant.platform) && !files.some(file => file.video)) throw new Error('This channel requires a real video file. A generated script is not a publishable video; attach an actual video first.');
+  if (videoPlatforms.has(variant.platform) && !(variant.platform === 'bilibili' && variant.format === 'article') && !files.some(file => file.video)) throw new Error('This channel requires a real video file. A generated script is not a publishable video; attach an actual video first.');
 }
 export async function verifyDraftApproval(draft: Draft): Promise<void> {
   if (!draft.approvedHash || draft.approvedHash !== await draftHash(draft)) throw new Error('Draft content or media changed after approval. Review and approve it again.');
@@ -149,7 +151,18 @@ export async function addAccount(input: Omit<Account, 'id'>): Promise<Account> {
   });
 }
 function sameTarget(left: Account, right: Account): boolean {
-  return left.platform === right.platform && left.provider === right.provider && left.integrationId === right.integrationId && left.label === right.label;
+  return left.platform === right.platform && left.provider === right.provider && left.integrationId === right.integrationId && left.label === right.label && JSON.stringify(left.reddit) === JSON.stringify(right.reddit);
+}
+export async function checkAccountConnection(id: string): Promise<Account> {
+  const account = findAccount(await readState(), id);
+  if (account.provider !== 'postiz') throw new Error('Use the existing YouTube authorization check or verify native login in Chrome.');
+  await verifyIntegration(account);
+  return mutateState(state => {
+    const current = findAccount(state, id);
+    if (!sameTarget(current, account)) throw new Error('Account target changed during connection verification. Refresh and check again.');
+    current.verifiedAt = now();
+    return current;
+  });
 }
 export async function updateAccount(id: string, input: Omit<Account, 'id'>): Promise<Account> {
   const account = accountSchema.parse({ ...input, id });
@@ -260,7 +273,7 @@ async function dispatchDue(): Promise<Job[]> {
 }
 export async function pausePublishing(paused: boolean): Promise<void> { await mutateState(state => { state.paused = paused; }); }
 
-const receiptHosts: Record<Platform, readonly string[]> = { xiaohongshu: ['xiaohongshu.com', 'xhslink.com'], reddit: ['reddit.com'], x: ['x.com', 'twitter.com'], wechat: ['mp.weixin.qq.com'], tiktok: ['tiktok.com'], bilibili: ['bilibili.com', 'b23.tv'], youtube: ['youtube.com', 'youtu.be'], kuaishou: ['kuaishou.com'], douyin: ['douyin.com'], instagram: ['instagram.com'], linkedin: ['linkedin.com'], facebook: ['facebook.com', 'fb.watch'] };
+const receiptHosts: Record<Platform, readonly string[]> = { xiaohongshu: ['xiaohongshu.com', 'xhslink.com'], reddit: ['reddit.com'], x: ['x.com', 'twitter.com'], wechat: ['mp.weixin.qq.com'], tiktok: ['tiktok.com'], bilibili: ['bilibili.com', 'b23.tv'], youtube: ['youtube.com', 'youtu.be'], kuaishou: ['kuaishou.com'], douyin: ['douyin.com'], instagram: ['instagram.com'], linkedin: ['linkedin.com'], facebook: ['facebook.com', 'fb.watch'], producthunt: ['producthunt.com'], zhihu: ['zhihu.com'] };
 function receiptUrl(platform: Platform, remoteUrl: string): URL {
   const url = new URL(remoteUrl);
   if (url.protocol !== 'https:' || (url.port && url.port !== '443') || url.username || url.password || !receiptHosts[platform].some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) throw new Error('Publication URL must use HTTPS on the selected platform domain.');
@@ -271,6 +284,16 @@ export function extractPlatformId(platform: Platform, remoteUrl: string): string
   const path = decodeURIComponent(url.pathname);
   let id: string | undefined;
   switch (platform) {
+    case 'producthunt': {
+      id = /^\/posts\/([a-z0-9][a-z0-9-]*)\/?$/i.exec(path)?.[1];
+      if (!id && /^\/products\/[a-z0-9][a-z0-9-]*\/?$/i.test(path) && url.searchParams.getAll('launch').length === 1) {
+        const launch = url.searchParams.get('launch');
+        if (launch && /^[a-z0-9][a-z0-9-]*$/i.test(launch)) id = launch;
+      }
+      if (id && ['new', 'edit', 'draft'].includes(id.toLowerCase())) id = undefined;
+      break;
+    }
+    case 'zhihu': id = url.hostname === 'zhuanlan.zhihu.com' ? /^\/p\/(\d+)\/?$/.exec(path)?.[1] : /^\/question\/\d+\/answer\/(\d+)\/?$/.exec(path)?.[1]; break;
     case 'x': id = /^\/[^/]+\/status\/(\d+)(?:\/|$)/.exec(path)?.[1]; break;
     case 'reddit': id = /^\/(?:r\/[^/]+\/|user\/[^/]+\/)?comments\/([a-z0-9]+)(?:\/|$)/i.exec(path)?.[1]; break;
     case 'youtube':

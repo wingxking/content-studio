@@ -7,21 +7,24 @@
       "properties": {
         "topicOrigin": {
           "type": "string",
-          "enum": ["editorial", "trend"]
+          "enum": [
+            "editorial",
+            "trend"
+          ]
         },
         "topic": {
           "type": "string",
-          "minLength": 3,
+          "minLength": 1,
           "maxLength": 1000
         },
         "audience": {
           "type": "string",
-          "minLength": 3,
+          "minLength": 1,
           "maxLength": 1000
         },
         "angle": {
           "type": "string",
-          "minLength": 3,
+          "minLength": 1,
           "maxLength": 4000
         },
         "sources": {
@@ -72,7 +75,9 @@
               "douyin",
               "instagram",
               "linkedin",
-              "facebook"
+              "facebook",
+              "producthunt",
+              "zhihu"
             ]
           }
         }
@@ -99,6 +104,23 @@
           "minLength": 1,
           "maxLength": 80000
         },
+        "document": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "content": {
+              "$ref": "#/$defs/__schema0"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "content"
+          ],
+          "additionalProperties": false
+        },
         "variants": {
           "minItems": 1,
           "maxItems": 12,
@@ -120,7 +142,9 @@
                   "douyin",
                   "instagram",
                   "linkedin",
-                  "facebook"
+                  "facebook",
+                  "producthunt",
+                  "zhihu"
                 ]
               },
               "title": {
@@ -148,6 +172,53 @@
                   "type": "string",
                   "minLength": 1
                 }
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "article",
+                  "image_note",
+                  "video",
+                  "product_launch"
+                ]
+              },
+              "launch": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "tagline": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 260
+                  },
+                  "firstComment": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10000
+                  }
+                },
+                "required": [
+                  "url",
+                  "name",
+                  "tagline",
+                  "description",
+                  "firstComment"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -173,5 +244,114 @@
     "brief",
     "content"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "__schema0": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "doc",
+            "paragraph",
+            "heading",
+            "text",
+            "bulletList",
+            "orderedList",
+            "listItem",
+            "blockquote",
+            "codeBlock",
+            "hardBreak",
+            "horizontalRule",
+            "image",
+            "citation"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 80000
+        },
+        "attrs": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12000
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "marks": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bold",
+                  "italic",
+                  "strike",
+                  "code",
+                  "link"
+                ]
+              },
+              "attrs": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 12000
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "content": {
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    }
+  }
 }

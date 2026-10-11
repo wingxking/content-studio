@@ -1,16 +1,17 @@
+import { publishingCapability, validateLaunchVariant } from './publishing-capabilities.ts';
 import { basename } from 'node:path';
 import { z } from 'zod';
 import { mutateState, readState } from './store.ts';
 import { approveDraft, preparePublication, retryFailedPublication, reconcileJob, runDueJobs } from './pipeline.ts';
 import { createOperation, createVideoOperation, listOperations, listVideoOperations } from './editor.ts';
 import { reconcileYouTubeJob, uploadYouTubeJob, youtubeSettingsSchema, expectedYouTubeChannelId } from './youtube.ts';
-import { nativeUrls, type Job, type Account, type Draft } from './model.ts';
+import { type Job, type Account, type Draft } from './model.ts';
 import { hasYouTubeUploadJournal } from './publication-journal.ts';
 
 function automaticFor(account: Account, draft: Draft): boolean {
   if (account.status !== 'connected') return false;
   if (account.provider === 'native') return account.platform === 'youtube' && account.integrationId === expectedYouTubeChannelId;
-  if (!['x', 'linkedin'].includes(account.platform)) return false;
+  if (!['x', 'linkedin', 'reddit'].includes(account.platform)) return false;
   if (account.platform === 'x' && (draft.brief.topicOrigin === 'trend' || draft.brief.sources.some(source => new URL(source.url).hostname === 'trends.google.com'))) return false;
   return true;
 }
@@ -22,6 +23,7 @@ export async function publishDraft(id: string, value: z.infer<typeof publishInpu
   if (!draft || draft.revision !== input.expectedRevision) throw new Error('Draft revision changed. Refresh and review before publishing.');
   const accounts = input.accountIds.map(accountId => { const account = state.accounts.find(item => item.id === accountId); if (!account || !draft.variants.some(variant => variant.platform === account.platform)) throw new Error('Select an account for an existing platform version.'); return account; });
   if (new Set(accounts.map(item => item.platform)).size !== accounts.length) throw new Error('Choose one target account per platform in this publication.');
+  for (const account of accounts) { const variant = draft.variants.find(item => item.platform === account.platform); if (variant) validateLaunchVariant(variant); }
   await approveDraft(id, input.expectedRevision); const jobs: Job[] = [];
   for (const account of accounts) {
     const automatic = automaticFor(account, draft) && (account.platform !== 'youtube' || account.provider !== 'native' || input.youtubeSettings !== undefined);
@@ -107,12 +109,13 @@ export async function publicationHandoff(id: string) {
   const automatic = Boolean(draft && job.draftId && automaticFor(account, draft)) && (await listOperations(job.draftId ?? job.subject?.id ?? job.id)).some(operation => operation.kind === 'publish' && operation.input.jobId === job.id);
   const reason = account.status !== 'connected' ? '账号尚未完成自动发布连接，可在原生创作页面登录并发布。' : automatic ? '支持已授权的 API 发布；如当前任务受阻，可按下方步骤核对后继续。' : '此平台使用创作者原生发布流程；保留人工发布步骤以符合平台权限和自动化要求。';
   const files = variant.mediaPaths.map(path => ({ name: basename(path), url: `/api/media?path=${encodeURIComponent(path)}` }));
-  return { requiresReconciliation, nativeUrl: nativeUrls[job.platform], title: variant.title, text: variant.text, tags: variant.tags, files, automatic, reason,
+  const capability = publishingCapability(job.platform, job.subject?.kind === 'video' || variant.format === 'video' ? 'video' : 'article', account, { postizConfigured: Boolean(process.env.POSTIZ_API_KEY), expectedYoutubeChannel: expectedYouTubeChannelId });
+  return { requiresReconciliation, launch: variant.launch, articlePackageUrl: `/api/jobs/${job.id}/article.html`, capability, nativeUrl: capability.nativeUrl, title: variant.title, text: variant.text, tags: variant.tags, files, automatic, reason,
     steps: [
       `在 Chrome 的 radarxai@gmail.com 配置文件中打开创作页面，确认目标账号为 ${account.label}。`,
       '点击复制标题和正文，将内容粘贴到对应编辑框；检查格式、来源、标签及平台要求的 AI 内容标识。',
-      files.length ? '下载下方素材，在发布页点击上传/选择文件，从下载目录选择对应图片或视频。' : ['youtube', 'tiktok', 'bilibili', 'kuaishou', 'douyin'].includes(job.platform) ? '此版本还没有视频。先创建独立视频稿，渲染并预览，附加到平台版本后重新发布。' : '如果平台要求图片，请先在素材库上传并附加到该平台版本。',
-      job.platform === 'reddit' ? '选择个人主页或已核对规则的 subreddit，确认该社区允许此类内容。' : '预览最终页面，检查目标账号、可见性、标题和媒体。',
+      files.length ? '下载下方素材，在发布页点击上传/选择文件，从下载目录选择对应图片或视频。' : ['youtube', 'tiktok', 'bilibili', 'kuaishou', 'douyin'].includes(job.platform) && !(job.platform === 'bilibili' && variant.format === 'article') ? '此版本还没有视频。先创建独立视频稿，渲染并预览，附加到平台版本后重新发布。' : '如果平台要求图片，请先在素材库上传并附加到该平台版本。',
+      job.platform === 'producthunt' ? '确认个人账号完成 onboarding；按已保存的产品网址、名称、Tagline、介绍和首条评论填写产品上线页。可先在平台 Create draft，不要将本地资料当成已上线产品。' : job.platform === 'zhihu' ? '使用专栏文章入口，核对引用、内容声明与预览；保存草稿后仍需在平台确认发布。' : job.platform === 'bilibili' && variant.format === 'article' ? '使用专栏文章入口，不要向视频上传入口提交文字稿。核对封面、引用、声明并预览。' : job.platform === 'reddit' ? '选择个人主页或已核对规则的 subreddit，确认该社区允许此类内容。' : '预览最终页面，检查目标账号、可见性、标题和媒体。',
       '在平台完成一次发布，复制实际帖文/视频链接和编号，回到此页填写发布回执。结果不明时先查看账号历史，避免重复发布。',
     ] };
 }

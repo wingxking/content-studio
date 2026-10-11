@@ -1,6 +1,6 @@
 # Platform content growth and editorial restrictions
 
-Checked: 2026-10-10, Asia/Singapore. Scope: all 12 format IDs currently supported by Content Studio. Format support is not publishing permission or live channel acceptance. Implementation and reusable prompts are described in [prompt workflows](content-prompt-workflows.md); the project skill is [content-editorial](../.agents/skills/content-editorial/SKILL.md).
+Checked: 2026-10-10, Asia/Singapore. Original scope: 12 format IDs. Product Hunt and Zhihu were added in the [publishing upgrade](publishing-capabilities-upgrade-2026-10-11.zh-CN.md), making 14 registered platform IDs with separate format/access checks. Format support is not publishing permission or live channel acceptance. Implementation and reusable prompts are described in [prompt workflows](content-prompt-workflows.md); the project skill is [content-editorial](../.agents/skills/content-editorial/SKILL.md).
 
 ## What the evidence supports
 

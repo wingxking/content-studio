@@ -1,0 +1,6 @@
+import type { Variant } from '../core/model.ts';
+export function LaunchFields({ variant, onChange }: { variant: Variant; onChange: (value: Partial<Variant>) => void }) {
+  const launch = variant.launch ?? { url: '', name: '', tagline: '', description: '', firstComment: '' };
+  const edit = (key: keyof typeof launch, value: string) => onChange({ format: 'product_launch', launch: { ...launch, [key]: value } });
+  return <section className="note-card"><h3>Product Hunt 上线资料</h3><p className="hint">产品上线需要真实产品网址和个人账号；普通新闻不能作为产品上线。以下资料随稿件版本保存，发布时保留快照。</p><label>产品公开网址<input type="url" value={launch.url} onChange={event => edit('url', event.target.value)} placeholder="https://your-product.example"/></label><label>产品名称<input maxLength={100} value={launch.name} onChange={event => edit('name', event.target.value)}/></label><label>Tagline · 最多 60 字符<input maxLength={60} value={launch.tagline} onChange={event => edit('tagline', event.target.value)}/></label><label>产品介绍 · 最多 260 字符<textarea rows={3} maxLength={260} value={launch.description} onChange={event => edit('description', event.target.value)}/></label><label>Maker 首条评论<textarea rows={4} maxLength={10000} value={launch.firstComment} onChange={event => edit('firstComment', event.target.value)}/></label></section>;
+}

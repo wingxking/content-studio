@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { assertXText } from './text-limits.ts';
+import { validateRedditTarget } from './publishing-capabilities.ts';
 import type { Account, Job, Variant } from './model.ts';
 
 const integrationSchema = z.object({ id: z.string().min(1), name: z.string(), identifier: z.string(), disabled: z.boolean().optional() });
@@ -39,16 +40,17 @@ export function canonicalPostizContent(variant: Variant): string {
   return `${variant.text}${tags.length ? `\n\n${tags.join(' ')}` : ''}`;
 }
 export function validatePostizVariant(account: Account, variant: Variant): void {
-  if (!['x', 'linkedin'].includes(account.platform)) throw new Error('Automatic Postiz publishing currently supports text X and LinkedIn. Use native handoff for this platform.');
+  if (!['x', 'linkedin', 'reddit'].includes(account.platform)) throw new Error('Automatic Postiz publishing currently supports text X, LinkedIn and approved Reddit self posts. Use native handoff for this platform.');
   if (variant.mediaPaths.length) throw new Error('Postiz media upload is not configured. Use native handoff with the original files.');
   if (!account.integrationId) throw new Error('A verified Postiz integration ID is required.');
   const content = canonicalPostizContent(variant);
+  if (account.platform === 'reddit') { validateRedditTarget(account); if (variant.title.length < 2 || variant.title.length > 300 || content.length > 40000) throw new Error('Reddit requires a 2–300 character title and at most 40000 characters of text.'); }
   if (account.platform === 'x') assertXText(content);
   if (account.platform === 'linkedin' && content.length > 3000) throw new Error('LinkedIn text and tags exceed 3000 characters.');
 }
 export async function submitPostiz(job: Job, account: Account, variant: Variant, integration: Integration): Promise<string> {
   validatePostizVariant(account, variant);
-  const settings = account.platform === 'x' ? { __type: 'x', who_can_reply_post: 'everyone' } : { __type: integration.identifier };
+  const settings = account.platform === 'reddit' && account.reddit ? { __type: 'reddit', subreddit: [{ value: { subreddit: account.reddit.subreddit, title: variant.title, type: 'self', url: '', is_flair_required: account.reddit.flairRequired, flair: account.reddit.flair } }] } : account.platform === 'x' ? { __type: 'x', who_can_reply_post: 'everyone' } : { __type: integration.identifier };
   const body = { type: 'now', date: job.submissionStartedAt ?? new Date().toISOString(), shortLink: false, tags: [], posts: [{ integration: { id: account.integrationId }, value: [{ content: canonicalPostizContent(variant), image: [] }], settings }] };
   let response: Response;
   try { response = await request('/posts', 'POST', body); }

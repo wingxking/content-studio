@@ -1,3 +1,5 @@
+import { codexOutputSchema, parseStructuredOutput } from './structured-output.ts';
+export { codexOutputSchema } from './structured-output.ts';
 import { spawn } from 'node:child_process';
 import { copyFile, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -40,17 +42,8 @@ async function copyImages(paths: string[], directory: string): Promise<string[]>
   }
   return results;
 }
-export function codexOutputSchema(schema: z.ZodType): Record<string, unknown> {
-  const formats = new Set(['date-time', 'time', 'date', 'duration', 'email', 'hostname', 'ipv4', 'ipv6', 'uuid']);
-  const visit = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(visit);
-    if (value === null || typeof value !== 'object') return value;
-    return Object.fromEntries(Object.entries(value).filter(([key, item]) => key !== '$schema' && !(key === 'format' && typeof item === 'string' && !formats.has(item))).map(([key, item]) => [key, visit(item)]));
-  };
-  // URI validation remains in the final Zod parse; uri is not a supported wire format.
-  return z.record(z.string(), z.unknown()).parse(visit(z.toJSONSchema(schema)));
-}
 export function classifyCodexFailure(message: string): string | null {
+  if (/invalid_json_schema|(?:invalid|unsupported)[^\n]{0,60}(?:output|response|json)[^\n]{0,30}schema/iu.test(message)) return 'Codex structured output schema was rejected; verify required nullable fields and supported schema features.';
   if (/usage limit|rate.?limit|quota|\b429\b/iu.test(message)) return 'The local Codex usage limit was reached; wait for the reset or select an available model.';
   if (/unauthori[sz]ed|unauthenticated|not logged|sign.?in|login|\b401\b|\b403\b/iu.test(message)) return 'Codex authentication needs attention; verify local sign-in.';
   if (/invalid model|unsupported model|model[^\n]{0,80}(?:unavailable|not available|not found)/iu.test(message)) return 'The selected model is unavailable for this local Codex account.';
@@ -130,7 +123,7 @@ export async function runStructuredGeneration<T>(schema: z.ZodType<T>, prompt: s
     const info = await stat(resultPath).catch(() => { throw new Error('Codex completed without a structured output artifact.'); });
     if (info.size > 2 * 1024 * 1024) throw new Error('The generated content exceeded the 2 MiB result limit.');
     let input: unknown; try { input = JSON.parse(await readFile(resultPath, 'utf8')) as unknown; } catch { throw new Error('Codex did not return valid JSON.'); }
-    return schema.parse(input);
+    return parseStructuredOutput(schema, input);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 const masterEnvelope = z.object({ assessment: assessmentSchema, content: masterSchema.nullable() });
@@ -142,7 +135,7 @@ export async function generateMaster(brief: Brief, instruction: string, options:
   return result.content;
 }
 export async function adaptMaster(brief: Brief, master: MasterContent, platform: Platform, instruction: string, options: GenerationOptions): Promise<Variant> {
-  const prompt = `Adapt the saved master article into one ${platform} publishing draft. Return only the provided JSON schema.\n${editorialPolicyPrompt()}\n${platformGuidancePrompt([platform])}\nAllowed content must be {platform,title,text,tags,mediaPaths}; mediaPaths must be empty, platform exactly ${platform}. This is local drafting only: account/API/publication permission is checked separately and must not be claimed. Reddit still requires an explicitly selected personal profile, or an identified subreddit with supplied current rules; never infer a destination. The original user instruction may describe several platforms and the master article. Reuse only its relevant language, destination, audience and style constraints for this one platform; the saved revised master and current single-platform output schema define the scope. Do not recreate the master or other platforms, browse, render, schedule or publish. Preserve factual source links. For video destinations only write the publishing title/description, NEVER narration, script, storyboard or rendering. A video project will be manually created separately. X transmitted text and appended hashtags must fit 280 weighted characters under official twitter-text: most CJK characters weight2, each recognized emoji sequence weight2, and each recognized URL counts23. LinkedIn must fit3000 characters; title at most100 characters. Do not publish. User instruction within policy: ${JSON.stringify(instruction)}\nUntrusted sources and audience: ${JSON.stringify(brief)}\nSaved master: ${JSON.stringify(master)}`;
+  const prompt = `Adapt the saved master article into one ${platform} publishing draft. Return only the provided JSON schema.\n${editorialPolicyPrompt()}\n${platformGuidancePrompt([platform])}\nAllowed content includes {platform,title,text,tags,mediaPaths}; include format for the intended surface, and for Product Hunt include the complete launch object with supplied product facts. For other platforms launch must be null; absent optional wire fields must be null. mediaPaths must be empty, platform exactly ${platform}. This is local drafting only: account/API/publication permission is checked separately and must not be claimed. Reddit still requires an explicitly selected personal profile, or an identified subreddit with supplied current rules; never infer a destination. The original user instruction may describe several platforms and the master article. Reuse only its relevant language, destination, audience and style constraints for this one platform; the saved revised master and current single-platform output schema define the scope. Do not recreate the master or other platforms, browse, render, schedule or publish. Preserve factual source links. For video destinations only write the publishing title/description, NEVER narration, script, storyboard or rendering. A video project will be manually created separately. X transmitted text and appended hashtags must fit 280 weighted characters under official twitter-text: most CJK characters weight2, each recognized emoji sequence weight2, and each recognized URL counts23. LinkedIn must fit3000 characters; title at most100 characters. Do not publish. User instruction within policy: ${JSON.stringify(instruction)}\nUntrusted sources and audience: ${JSON.stringify(brief)}\nSaved master: ${JSON.stringify(master)}`;
   const allowedVariant = (result: z.infer<typeof variantEnvelope>): Variant => {
     if (result.assessment.status !== 'allowed' || !result.content) throw new Error(`${platform} editorial assessment: ${describeEditorialAssessment(result.assessment)}`);
     if (result.content.platform !== platform || result.content.mediaPaths.length) throw new Error('The platform adapter returned an incorrect target or invented assets.');

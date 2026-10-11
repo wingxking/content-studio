@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { readFile, stat } from 'node:fs/promises';
 import { z } from 'zod';
+import { parseStructuredOutput } from './structured-output.ts';
 import { codexOutputSchema, type GenerationOptions } from './generation-engine.ts';
 export function modelExecutorOrigin(): string {
   const url = new URL(process.env.STUDIO_MODEL_EXECUTOR_URL ?? 'http://model-runner:8910');
@@ -32,5 +33,5 @@ export async function executeRemoteModel<T>(schema: z.ZodType<T>, prompt: string
   if (!response.ok) { const error = z.object({ error: z.string() }).safeParse(value); throw new Error(error.success ? error.data.error : 'Model runner needs attention. Inspect container authorization and connectivity.'); }
   const result = z.object({ result: z.unknown() }).parse(value); options.signal?.throwIfAborted();
   await options.onProgress?.({ phase: 'model_completed', message: 'Validating isolated model output.' });
-  return schema.parse(result.result);
+  return parseStructuredOutput(schema, result.result);
 }
