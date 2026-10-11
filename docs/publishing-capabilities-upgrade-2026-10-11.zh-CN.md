@@ -118,7 +118,7 @@ QA 地址为临时 `127.0.0.1:14311`，使用独立 Supabase workspace 和容器
 | 平台 | 本轮 Chrome 观察 | 下一步 |
 | --- | --- | --- |
 | Reddit | 已登录，头像菜单显示 `u/radarxai26` | 接入获准的 Postiz/Reddit App，选择有权限的测试社区，登记规则与 flair；没有真实批准不能启用自动发布 |
-| Product Hunt | 2026-10-12 根据用户 `approve` 完成 Google Continue；已登录 `coding open / @coding_open`；`/posts/new` 显示产品 URL 表单和 Complete onboarding 提示 | 年龄声明已获用户确认并勾选；onboarding 第 1/2 步尚未提交，待选择保留或取消三项默认邮件订阅（自动审批拒绝了未经明确授权的订阅变更）。本地 native/Blocked；仍需真实产品 URL/资料，无发布 API 授权、远端草稿或公开 launch |
+| Product Hunt | 2026-10-12 注册及 onboarding 完成：提交已确认的年龄声明及三项邮件订阅取消选择，跳过可选资料后进入已登录首页；`coding open / @coding_open` 的 `/posts/new` 已无 onboarding 提示 | 既有账号更新 native/Connected，仅身份与原生入口核验；能力为 manual，automatic/remoteDraft 均为 false。真实公开产品 URL/上线资料、远端草稿及公开 launch 待验收 |
 | 微信公众号 | 本轮未登录；此前 Computer Use 明确拒绝 `mp.weixin.qq.com` | 由公众号管理员在允许的环境扫码；提供非敏感账号类型/权限说明，评估官方 API 或可用草稿扩展；不绕过工具限制 |
 | 知乎 | 专栏入口跳到登录；可见手机/扫码/微信方式，没有 Google 入口 | 本人在已打开 Chrome 标签完成短信或 App 扫码，再核对身份与专栏编辑器 |
 | 小红书 | 已登录创作后台，显示 `ziv` 和图文/视频入口 | 核对账号内容资格、AI 标识及平台许可；登录状态不是自动发布授权 |
@@ -128,7 +128,7 @@ QA 地址为临时 `127.0.0.1:14311`，使用独立 Supabase workspace 和容器
 
 ## 6. 后续实施顺序
 
-1. 完成 Product Hunt 邮件订阅选择及 onboarding 提交，以及知乎/B站扫码节点与真实身份核验；仍缺资格的渠道显示 Blocked/Needs login。
+1. Product Hunt 注册/onboarding 已完成；继续完成知乎/B站扫码节点与真实身份核验，仍缺资格的渠道显示 Blocked/Needs login。
 2. 优先 Reddit：一个获准 integration、一个允许测试的社区、一个内容版本，真实提交一次并读取作品 ID/URL，验证删除/拒绝/不明结果的恢复。
 3. Product Hunt：仅对真实产品生成上线包，先在原生页面保存并读取草稿，再按产品发布日期上线；不以新闻稿测试产品 launch。
 4. 微信/知乎/B站文章：先验证一个可用账号和扩展许可，再试点 WechatSync 草稿桥接；图片映射、草稿 ID、读取和人工发布状态逐项验收。
