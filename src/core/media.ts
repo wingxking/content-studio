@@ -5,6 +5,7 @@ import { access, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { delimiter, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { platformLabels, type Draft, type Platform } from './model.ts';
+import { synthesizeCpuSpeech } from './video-renderer.ts';
 
 const videoPlatforms: ReadonlySet<Platform> = new Set(['youtube', 'tiktok', 'bilibili', 'kuaishou', 'douyin']);
 const maxCards = 20;
@@ -269,7 +270,9 @@ export async function buildMedia(draft: Draft, platform: Platform, options: { im
   const renderer = await findTool('rsvg-convert');
   const ffmpeg = kind === 'video' ? await findTool('ffmpeg') : null;
   const ffprobe = kind === 'video' ? await findTool('ffprobe') : null;
-  const speech = kind === 'video' ? await findTool('say') : null;
+  const cpuTts = process.env.STUDIO_TTS_URL;
+  if (kind === 'video' && process.env.STUDIO_CONTAINER === 'true' && !cpuTts) throw new Error('Container video export requires the configured CPU TTS service.');
+  const speech = kind === 'video' && !cpuTts ? await findTool('say') : null;
   const directory = join(resolve(process.env.STUDIO_DATA_DIR ?? '.studio'), 'media', randomUUID());
   await mkdir(directory, { recursive: true, mode: 0o700 });
 
@@ -294,10 +297,12 @@ export async function buildMedia(draft: Draft, platform: Platform, options: { im
     if (kind === 'cards') {
     return { files: images, kind, note: `Created ${images.length} PNG cards at 1080 × 1440. Exact caption.txt and SVG sources are stored beside the cards; standalone source URLs may be grouped on a separate source card in their original order. Review the rendered cards and approve the assembled draft again before publication.` };
     }
-    if (!ffmpeg || !ffprobe || !speech) throw new Error('Required video tools were not resolved.');
-    const audioPath = join(directory, 'narration.aiff');
-    const voice = process.env.STUDIO_TTS_VOICE ?? (/\p{Script=Han}/u.test(narration) ? 'Tingting' : 'Samantha');
-    await runTool(speech, ['-v', voice, '-r', '170', '-f', join(directory, 'narration.txt'), '-o', audioPath], directory, 120_000, options.signal);
+    if (!ffmpeg || !ffprobe || (!speech && !cpuTts)) throw new Error('Required video tools were not resolved.');
+    const audioName = cpuTts ? 'narration.wav' : 'narration.aiff';
+    const audioPath = join(directory, audioName);
+    const voice = process.env.STUDIO_TTS_VOICE ?? (/\p{Script=Han}/u.test(narration) ? (cpuTts ? 'zf_xiaobei' : 'Tingting') : (cpuTts ? 'af_heart' : 'Samantha'));
+    if (cpuTts) await synthesizeCpuSpeech(cpuTts, narration, voice, 1, audioPath, options.signal);
+    else if (speech) await runTool(speech, ['-v', voice, '-r', '170', '-f', join(directory, 'narration.txt'), '-o', audioPath], directory, 120_000, options.signal);
     await requireFile(audioPath);
     const duration = Number((await runTool(ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioPath], directory)).trim());
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('Could not measure the generated narration audio.');
@@ -308,13 +313,13 @@ export async function buildMedia(draft: Draft, platform: Platform, options: { im
     const slides = ['ffconcat version 1.0', ...weights.flatMap((weight, index) => [`file card-${String(index + 1).padStart(2, '0')}.png`, `duration ${(duration * weight / totalWeight).toFixed(6)}`]), `file card-${String(pages.length).padStart(2, '0')}.png`, ''].join('\n');
     await writeFile(join(directory, 'slides.ffconcat'), slides, { encoding: 'utf8', mode: 0o600 });
     const videoPath = join(directory, 'video.mp4');
-    await runTool(ffmpeg, ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '1', '-i', 'slides.ffconcat', '-i', 'narration.aiff', '-map', '0:v:0', '-map', '1:a:0', '-vf', 'fps=24,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-t', duration.toFixed(6), 'video.mp4'], directory, 120_000, options.signal);
+    await runTool(ffmpeg, ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'concat', '-safe', '1', '-i', 'slides.ffconcat', '-i', audioName, '-map', '0:v:0', '-map', '1:a:0', '-vf', 'fps=24,format=yuv420p', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-t', duration.toFixed(6), 'video.mp4'], directory, 120_000, options.signal);
     await requireFile(videoPath);
     const probeOutput = await runTool(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'json', videoPath], directory, 120_000, options.signal);
     const probeSchema = z.object({ streams: z.array(z.object({ codec_type: z.string() })) });
     const streams = probeSchema.parse(JSON.parse(probeOutput) as unknown).streams.map(stream => stream.codec_type);
     if (!streams.includes('video') || !streams.includes('audio')) throw new Error(`The generated MP4 is missing its video or narration track (found: ${streams.join(', ') || 'none'}).`);
-    return { files: [videoPath], kind, note: `Created a ${Math.ceil(duration)}-second narrated slideshow MP4 at 1080 × 1920 using the ${voice} macOS voice. Exact narration.txt, caption.txt and source cards are stored beside it. Review the video and approve the assembled draft again before publication.` };
+    return { files: [videoPath], kind, note: `Created a ${Math.ceil(duration)}-second narrated slideshow MP4 at 1080 × 1920 using the ${voice} ${cpuTts ? 'CPU' : 'legacy macOS'} voice. Exact narration.txt, caption.txt and source cards are stored beside it. Review the video and approve the assembled draft again before publication.` };
   } catch (error) {
     await rm(directory, { recursive: true, force: true });
     throw error;

@@ -42,7 +42,7 @@ try {
       break;
     }
     case 'youtube-auth': {
-      result = { ...await authorizeDesktopYouTube({ clientFile: required(first, 'OAuth Desktop client JSON file'), secretDirectory: join(dataDirectory(), 'youtube', 'secrets'), onAuthorizationUrl: url => { process.stdout.write(`${JSON.stringify({ authorizationUrl: url, nextAction: 'Open this URL in Chrome profile radarxai@gmail.com and select the verified YouTube channel.' })}\n`); } }), ...await verifyYouTubeChannel() }; break;
+      result = { ...await authorizeDesktopYouTube({ clientFile: required(first, 'OAuth Desktop client JSON file'), secretDirectory: join(dataDirectory(), 'youtube', 'secrets'), ...(process.env.STUDIO_CONTAINER === 'true' ? { callbackPort: z.coerce.number().int().min(1024).max(65535).parse(process.env.STUDIO_YOUTUBE_OAUTH_PORT ?? 8765), listenHost: '0.0.0.0' as const } : {}), onAuthorizationUrl: url => { process.stdout.write(`${JSON.stringify({ authorizationUrl: url, nextAction: 'Open this URL in Chrome profile radarxai@gmail.com and select the verified YouTube channel.' })}\n`); } }), ...await verifyYouTubeChannel() }; break;
     }
     case 'youtube-channel': result = await verifyYouTubeChannel(); break;
     case 'youtube-upload': result = await uploadYouTubeJob(required(first, 'job ID'), youtubeSettingsSchema.parse(await loadJson(required(second, 'YouTube settings JSON file')))); break;

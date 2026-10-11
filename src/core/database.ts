@@ -1,3 +1,7 @@
+export function isTrustedDatabaseOrigin(url: URL): boolean {
+  const allowed = (process.env.STUDIO_INTERNAL_ORIGINS ?? '').split(',').filter(Boolean);
+  return !url.username && !url.password && (url.protocol === 'https:' || url.protocol === 'http:' && (['localhost', '127.0.0.1'].includes(url.hostname) || allowed.includes(url.origin)));
+}
 import { loadRuntimeEnvironment } from './runtime-env.ts';
 
 type DatabaseOptions = { method?: string; body?: unknown; prefer?: string };
@@ -8,7 +12,7 @@ export async function dbRequest(path: string, options: DatabaseOptions = {}): Pr
   const key = process.env.SUPABASE_SECRET_KEY;
   if (!base || !key) throw new Error('Local Supabase is not configured; run local setup first.');
   const url = new URL(base);
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))) {
+  if (!isTrustedDatabaseOrigin(url)) {
     throw new Error('Supabase must use HTTPS or a loopback HTTP endpoint.');
   }
   if (!path || path.startsWith('/') || path.includes('://') || /[\r\n#]/.test(path) || path.split('?')[0]?.split('/').includes('..')) {

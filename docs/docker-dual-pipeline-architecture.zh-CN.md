@@ -409,7 +409,7 @@ content-studio/
 | D5 独立视频 | 无文章也能建项目，分镜、CPU TTS、MPT项目CLI、字幕与质量检查 | 真实脚本→素材→配音→MP4；重启复用相同scene；修改文章不自动渲染；取消不留误完成 |
 | D6 发布与持续运行 | 先YouTube官方，增加分块上传/流式hash，按收益决定Postiz；恢复面板 | 大视频内存与中断续传；账号匹配；真实远端ID/URL/状态；未知提交不重发；全profile备份恢复 |
 
-D2 内模型登录若需要人的认证动作，先完成可执行环境并在 Web 显示精确步骤，再由账户所有者操作；不能把已有 Chrome 登录算作容器认证。Mac fallback 允许继续开发，但验收报告必须列为未全部容器化。
+D2 内模型登录若需要人的认证动作，先完成可执行环境并在 Web 显示精确步骤，再由账户所有者操作；不能把已有 Chrome 登录算作容器认证。The deployed runtime must be entirely containerized; native tooling is migration/recovery only and cannot satisfy final acceptance.
 
 D3 必须先 spike 再决定切换：新独立 schema 验证包安装/migrations、事务 enqueue、死信、延期、心跳、取消与旧尝试 fencing；先单类切换，暂停并 drain 旧队列，从业务 run/step 状态重建，不复制引擎内部表。若无法通过有界验收，则保留 pgmq/pg_cron 为唯一引擎，只补缺失的有限重试与资源隔离。
 
@@ -447,9 +447,9 @@ D0–D6 通过且用户本地确认前，不开始云端部署。
 
 ## 15. 核验清单与证据范围
 
-本轮完成：当前源码/AGENTS/交付记录复核，Mac/Docker只读状态检查，上游源码/版本/包/部分ARM镜像manifest和官方文档调研，架构与分阶段验收设计。
+The original architecture preflight covered source/runtime inventory and upstream research. Subsequent implementation and executed evidence are recorded in [Docker runtime delivery](docker-runtime.md); historical native acceptance remains separate.
 
-本轮未完成：新依赖安装、新Compose启动、LinuxCodex登录、TTS中文与ARM性能验证、MPT真实集成、pg-boss/Supabase迁移、Postiz账号连接、新平台发布。以上必须在后续实现中逐项留真实证据，不能从 stars、release或架构图推断通过。
+Implementation includes pinned dependencies, Compose role services, LocalFS/tus, independent video, rich articles and streaming publication recovery. Actual ARM bilingual CPU TTS/MPT rendering and isolated legacy recovery have executed evidence. Authenticated Linux Codex structured/image execution, automatic model catalog refresh, trusted public-source fetching and all eight isolated pg-boss spike contracts have now passed in Docker. The final source passed 176 tests, strict TypeScript and a production build. Docker/Chrome article, scheduling and recovery workflows have executed evidence; final image identity/fresh-render and requested-profile Chrome checks passed, while the 48-hour burn-in remains pending; pg-boss production cutover gates remain incomplete and the runtime retains pgmq/pg_cron. Postiz onboarding and new live publication are outside this coding acceptance.
 
 关联文档：
 

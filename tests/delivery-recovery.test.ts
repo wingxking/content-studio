@@ -88,12 +88,12 @@ test('new authorization replaces an unsent failed X snapshot after only Reddit i
   assert.notEqual(replacement.id, job.id);
   assert.equal(replacement.status, 'scheduled');
   assert.equal(replacement.attempts, 0);
-  assert.equal(replacement.snapshot?.draft.revision, approved.revision);
-  assert.equal(replacement.snapshot?.draft.approvedHash, approved.approvedHash);
+  assert.equal(replacement.snapshot?.draft?.revision, approved.revision);
+  assert.equal(replacement.snapshot?.draft?.approvedHash, approved.approvedHash);
   assert.equal(replacement.snapshot?.variant.text, content.variants[0]?.text);
   const preserved = (await readState()).jobs.find(item => item.id === job.id);
   assert.equal(preserved?.status, 'cancelled');
-  assert.equal(preserved?.snapshot?.draft.revision, draft.revision);
+  assert.equal(preserved?.snapshot?.draft?.revision, draft.revision);
   assert.equal(preserved?.attempts, 1);
   assert.equal(submissionCalls, 1, 'Preparing the replacement must not submit it.');
   const duplicateClick = await preparePublication({ draftId: draft.id, accountId: account.id, expectedRevision: approved.revision, automatic: true });

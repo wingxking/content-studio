@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { request } from 'node:http';
+import { createServer, request } from 'node:http';
 import { mkdtemp, writeFile, readFile, rm, stat, chmod } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { addAccount, approveDraft, createDraft, replaceDraft, runDueJobs, scheduleJob } from '../src/core/pipeline.ts';
+import { addAccount, approveDraft, cancelJob, createDraft, replaceDraft, runDueJobs, scheduleJob } from '../src/core/pipeline.ts';
 import { mutateState, readState } from '../src/core/store.ts';
 import { authorizeDesktopYouTube, desktopYouTubeTokenProvider, readPrivateJson, writePrivateJson, youtubeScopes } from '../src/core/youtube-oauth.ts';
-import { expectedYouTubeChannelId, reconcileYouTubeJob, uploadYouTubeJob, verifyYouTubeChannel } from '../src/core/youtube.ts';
+import { expectedYouTubeChannelId, reconcileYouTubeJob, resumeYouTubeJob, uploadYouTubeJob, verifyYouTubeChannel } from '../src/core/youtube.ts';
 
 const videoId = 'AbCdeF123_-';
 const session = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=fixture';
@@ -294,4 +294,48 @@ test('dispatcher preserves a live native YouTube owner beyond its network timeou
     await mutateState(state => { const job = state.jobs[0]; assert.ok(job); job.submissionOwner = `${hostname()}:999999999:fixture`; });
     assert.equal((await runDueJobs())[0]?.status, 'needs_reconciliation');
   } finally { await data.cleanup(); }
+});
+
+test('large video upload uses bounded chunks and explicit continuation resumes the same session offset', async () => {
+  const data = await fixture(); const chunkSize = 8 * 1024 * 1024; let inserts = 0; let chunks = 0; const ranges: string[] = [];
+  try {
+    const bytes = Buffer.alloc(chunkSize * 2 + 17); bytes.write('ftyp', 4, 'ascii'); await writeFile(data.media, bytes);
+    const state = await readState(); const original = state.jobs[0]; assert.ok(original); await cancelJob(original.id); await approveDraft(data.draftId);
+    const job = await scheduleJob({ draftId: data.draftId, accountId: original.accountId, scheduledAt: new Date().toISOString() });
+    const first = mockFetch((url, init) => {
+      if (url.pathname === '/youtube/v3/channels') return json({ items: [{ id: expectedYouTubeChannelId }] });
+      if (init.method === 'POST') { inserts++; return new Response(null, { headers: { Location: session } }); }
+      if (init.method === 'PUT' && init.body) { chunks++; assert.ok((init.body as ArrayBuffer).byteLength <= chunkSize); ranges.push(new Headers(init.headers).get('Content-Range') ?? ''); if (chunks === 1) return new Response(null, { status: 308, headers: { Range: `bytes=0-${chunkSize - 1}` } }); throw new Error('connection lost after first acknowledged chunk'); }
+      return readback();
+    });
+    await assert.rejects(uploadYouTubeJob(job.id, settings, { tokenProvider: async () => 'fixture', fetcher: first }), /preserved for reconciliation/);
+    const journal = await readPrivateJson(join(data.directory, 'youtube', 'uploads', `${job.id}.json`)) as { offset: number }; assert.equal(journal.offset, chunkSize);
+    const resumed = await resumeYouTubeJob(job.id, { tokenProvider: async () => 'fixture', fetcher: mockFetch((url, init) => {
+      if (url.pathname === '/youtube/v3/channels') return json({ items: [{ id: expectedYouTubeChannelId }] });
+      if (init.method === 'POST') { inserts++; throw new Error('A resumed upload must never insert another video.'); }
+      if (init.method === 'PUT' && !init.body) return new Response(null, { status: 308, headers: { Range: `bytes=0-${chunkSize - 1}` } });
+      if (init.method === 'PUT') { const range = new Headers(init.headers).get('Content-Range') ?? ''; ranges.push(range); assert.ok((init.body as ArrayBuffer).byteLength <= chunkSize); if (range.startsWith(`bytes ${chunkSize}-`)) return new Response(null, { status: 308, headers: { Range: `bytes=0-${chunkSize * 2 - 1}` } }); return json({ id: videoId }, 201); }
+      return readback();
+    }) });
+    assert.equal(resumed.status, 'published'); assert.equal(resumed.attempts, 1); assert.equal(inserts, 1); assert.equal(ranges[0], `bytes 0-${chunkSize - 1}/${bytes.length}`); assert.equal(ranges[2], `bytes ${chunkSize}-${chunkSize * 2 - 1}/${bytes.length}`);
+  } finally { await data.cleanup(); }
+});
+
+test('container OAuth uses a fixed published loopback port and retains Host/state/PKCE checks', async () => {
+  const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve)); const address = probe.address(); assert(address && typeof address !== 'string'); const port = address.port;
+  await new Promise<void>(resolve => probe.close(() => resolve()));
+  const directory = await mkdtemp(join(tmpdir(), 'youtube-container-oauth-')); const clientFile = join(directory, 'client.json');
+  await writeFile(clientFile, JSON.stringify({ installed: { client_id: 'fixture-client', client_secret: 'fixture-secret' } }));
+  let challenge = '';
+  try {
+    const result = await authorizeDesktopYouTube({ clientFile, secretDirectory: join(directory, 'secrets'), callbackPort: port, listenHost: '0.0.0.0', timeoutMs: 5000, onAuthorizationUrl: async value => {
+      const authorization = new URL(value); assert.equal(authorization.searchParams.get('scope'), youtubeScopes.join(' ')); challenge = authorization.searchParams.get('code_challenge') ?? '';
+      const callback = new URL(authorization.searchParams.get('redirect_uri') ?? ''); assert.equal(callback.origin, `http://127.0.0.1:${port}`);
+      callback.search = new URLSearchParams({ state: authorization.searchParams.get('state') ?? '', code: 'fixture-code' }).toString();
+      const wrongHost = await new Promise<number | undefined>((resolve, reject) => { const req = request(callback, { headers: { Host: `localhost:${port}` } }, response => { response.resume(); response.once('end', () => resolve(response.statusCode)); }); req.once('error', reject); req.end(); }); assert.equal(wrongHost, 400);
+      const invalid = new URL(callback); invalid.searchParams.set('state', 'wrong'); assert.equal((await fetch(invalid)).status, 400);
+      assert.equal((await fetch(callback)).status, 200);
+    }, fetcher: mockFetch((_url, init) => { const form = init.body as URLSearchParams; assert.equal(form.get('redirect_uri'), `http://127.0.0.1:${port}/oauth2/callback`); assert.equal(createHash('sha256').update(form.get('code_verifier') ?? '').digest('base64url'), challenge); return json({ access_token: 'fixture', refresh_token: 'fixture', expires_in: 3600, token_type: 'Bearer', scope: youtubeScopes.join(' ') }); }) });
+    assert.deepEqual(result, { authorized: true });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

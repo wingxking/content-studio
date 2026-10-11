@@ -1,0 +1,18 @@
+# Independent video component acceptance
+
+Checked locally on 2026-10-10. These checks ran in isolated Docker services and temporary test directories. Production accounts, publication and Linux Codex authentication were not exercised.
+
+Implemented in `src/core/video-model.ts`, `video.ts`, `video-renderer.ts` and `video-tools.ts`: independent projects with optional immutable article revision snapshots; sourced script/storyboard generation; bounded refinement proposals and explicit acceptance; revision/settings/asset approval; stable render IDs, owner fencing and heartbeats; CPU sentence WAV synthesis; hash-verified footage/audio reuse; fixed MPT project CLI receipts; SRT and caption burning; stream/dimension/timing/full-decode checks; account and metadata-bound delivery approval. Project state remains in Supabase; media and stage manifests remain local. Updating an article never renders or changes the linked video.
+
+Linux services built successfully on ARM64:
+
+- Renderer: `services/renderer/Dockerfile`, pinned Python 3.12.12 multi-platform base `sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c`; upstream MPT v1.3.8 `video_project.py` SHA-256 `96bca8c758ef7a6c83cfdbb42b6afbd8af94341251c6fd4822aa6705abbc61c4`; FFmpeg 5.1.9, libass and Noto CJK.
+- CPU TTS: `services/tts/Dockerfile`, official Kokoro-FastAPI v0.9.0 base `sha256:ee3111d6a2c903ed62f3b4fa19543c6901205ed39fce3c177e895b34a8386b9c`. Verified manifest includes ARM64 and AMD64. Baked model/voice fingerprint: `654434e7be9cf7c7a3a2f9dcd41e6f877fd417da3d73122b3fa5649355652734`. Startup reported CPU with 72 voice packs. Observed service memory after English/Chinese synthesis: 1.445 GiB under a 2 GiB limit; this is one sample, not a capacity guarantee.
+
+`services/renderer/smoke.py` executed inside the renderer against actual CPU TTS HTTP endpoints. English `af_heart` produced 2.331083 seconds; Chinese `zf_xiaobei` produced 3.749042 seconds. Prepared footage and both WAVs rendered through MPT into a 6.125-second MP4. SRT captions burned using Noto CJK, English/Chinese frames rendered without missing glyphs, and full FFmpeg decoding passed. Final SHA-256: `c9dec68de659ea9c68799a7c7957c3655c65b707a35886a8bc160cedcff18ccb`. Listening review was not performed.
+
+Repeat rendering reused all eight MPT stages. Deleting the Studio receipt and repeating `revise` recovered the same upstream revision `dcee8039edf44dc0913b023dbedf9271`. A renderer Docker restart retained that revision and all reusable stages. A separate 20-scene render was cancelled before export promotion; explicit retry succeeded with 59 of 62 stages reused, retaining upstream revision `66bc61c6293c4cf19eb70ae8e63fe664`.
+
+Evidence is retained under `/private/tmp/studio-d5-validation/acceptance/5b1dce34-2cf1-482a-bf45-b3212b64c83a/` (`acceptance.json`, WAVs, SRT, MP4, caption frames) and `/private/tmp/studio-d5-validation/acceptance/d0365574-6ff7-4d96-aa11-9ea229d2bc4b/cancel-acceptance.json`. Test projects are separate from real content. Domain tests use injected repositories/renderers to verify revision, approval, proposal, operation receipt, cancellation and integrity logic; those tests do not prove live accounts or model authorization.
+
+Remaining integration acceptance: run the TypeScript video worker via the application Compose stack against persisted Supabase projects; execute a real authenticated model script/storyboard job; approve supplied media, listen to narration and inspect the final portrait video; test restarts through the business queue/API; measure longer scripts and multi-scene memory/timing. AMD64 manifests were verified; AMD64 runtime was not executed. No sustained burn-in or publication was performed.

@@ -1,3 +1,6 @@
+import { resolveAssetPath } from './assets.ts';
+import type { ArticleNode } from './article-document.ts';
+import { canonicalArticle, documentFromText } from './article-document.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { open, realpath, stat } from 'node:fs/promises';
@@ -7,7 +10,7 @@ import { z } from 'zod';
 import { accountSchema, briefSchema, draftSchema, generatedSchema, metricsInputSchema, nativeUrls, type Account, type Brief, type Draft, type Generated, type Job, type Platform, type StudioState, type Variant } from './model.ts';
 import { dataDirectory, mutateState, readState, storageMode } from './store.ts';
 import { dbRpc } from './database.ts';
-import { resolveMediaLocation } from './media-location.ts';
+import { isManagedMediaPath, resolveMediaLocation } from './media-location.ts';
 import { writeDraftArtifacts } from './artifacts.ts';
 import { hasYouTubeUploadJournal } from './publication-journal.ts';
 import { assertAutomatedPublishingAllowed } from './publishing-policy.ts';
@@ -16,6 +19,7 @@ import { canonicalPostizContent, listRemotePosts, RejectedPublishError, submitPo
 const owner = `${hostname()}:${process.pid}:${randomUUID()}`;
 const videoPlatforms = new Set<Platform>(['tiktok', 'bilibili', 'youtube', 'kuaishou', 'douyin']);
 const activeSubmissions = new Set<string>();
+function requireArticleId(job: Job): string { if (!job.draftId || job.subject?.kind === 'video') throw new Error('This action requires an article publication.'); return job.draftId; }
 const now = (): string => new Date().toISOString();
 const digest = (input: unknown): string => createHash('sha256').update(JSON.stringify(input)).digest('hex');
 function findDraft(state: StudioState, id: string): Draft {
@@ -58,7 +62,7 @@ function inside(path: string, root: string): boolean {
 async function mediaInfo(path: string): Promise<{ hash: string; video: boolean }> {
   const absolute = await realpath(await resolveMediaLocation(path)).catch(() => { throw new Error(`Media file does not exist: ${path}`); });
   const roots = await Promise.all([realpath(process.cwd()), realpath(dataDirectory()).catch(() => resolve(dataDirectory()))]);
-  if (!roots.some(root => inside(absolute, root))) throw new Error('Media must be an original local file inside the project or STUDIO_DATA_DIR.');
+  if (!roots.some(root => inside(absolute, root)) && !await isManagedMediaPath(absolute)) throw new Error('Media must be an original local file inside the project or STUDIO_DATA_DIR.');
   const info = await stat(absolute);
   if (!info.isFile() || info.size === 0) throw new Error('Media must be a non-empty regular file.');
   const handle = await open(absolute, 'r');
@@ -72,7 +76,13 @@ async function mediaInfo(path: string): Promise<{ hash: string; video: boolean }
 }
 async function draftHash(draft: Draft): Promise<string> {
   const media = await Promise.all(draft.variants.flatMap(variant => variant.mediaPaths.map(async path => ({ path, hash: (await mediaInfo(path)).hash }))));
-  return digest({ revision: draft.revision, title: draft.title, body: draft.body, brief: draft.brief, variants: draft.variants, media });
+  const documentAssets: { assetId: string; hash: string }[] = [];
+  const visit = async (node: ArticleNode): Promise<void> => {
+    if (node.type === 'image') { const assetId = z.uuid().parse(node.attrs?.assetId); documentAssets.push({ assetId, hash: (await mediaInfo(await resolveAssetPath(assetId))).hash }); }
+    for (const child of node.content ?? []) await visit(child);
+  };
+  if (draft.document) await visit(draft.document.content);
+  return digest({ revision: draft.revision, title: draft.title, body: draft.body, ...(draft.document ? { document: draft.document, documentAssets } : {}), brief: draft.brief, variants: draft.variants, media });
 }
 function targetHash(draft: Draft, variant: Variant, account: Account): string {
   return digest({ draftApproval: draft.approvedHash, variant, accountId: account.id, platform: account.platform, provider: account.provider, integrationId: account.integrationId, label: account.label });
@@ -97,13 +107,14 @@ async function verifyApproval(draft: Draft, variant: Variant, account: Account, 
 
 export async function createDraft(briefInput: Brief, generatedInput: Generated, stableId?: string, generationModel?: string, generationContext?: { instruction: string; assetIds: string[] }): Promise<Draft> {
   const brief = briefSchema.parse(briefInput);
-  const generated = validGenerated(brief, generatedInput);
+  const generated = canonicalArticle(validGenerated(brief, generatedInput));
   const draft: Draft = { ...generated, id: stableId ? z.uuid().parse(stableId) : randomUUID(), brief, createdAt: now(), revision: 1, approvedHash: null, ...(generationModel !== undefined ? { generationModel: draftSchema.shape.generationModel.parse(generationModel) } : {}), ...(generationContext ? { generationInstruction: draftSchema.shape.generationInstruction.parse(generationContext.instruction), generationAssetIds: draftSchema.shape.generationAssetIds.parse(generationContext.assetIds) } : {}) };
   const result = await mutateState(state => { const existing = state.drafts.find(item => item.id === draft.id); if (existing) return existing; state.drafts.push(draft); return draft; });
   await writeDraftArtifacts(result);
   return result;
 }
 export async function replaceDraft(id: string, generatedInput: Generated, expectedRevision?: number, operationId?: string, appliedProposalId?: string): Promise<Draft> {
+  generatedInput = canonicalArticle(generatedInput);
   const previous = (await readState()).drafts.find(item => item.id === id);
   if (previous) await writeDraftArtifacts(previous);
   if (appliedProposalId && storageMode() === 'supabase') {
@@ -118,7 +129,8 @@ export async function replaceDraft(id: string, generatedInput: Generated, expect
     if (appliedProposalId && draft.lastAppliedProposalId === appliedProposalId) return draft;
     if (expectedRevision !== undefined && draft.revision !== expectedRevision) throw new Error('Draft revision changed while this operation was running. Refresh the draft and retry.');
     if (state.jobs.some(job => job.draftId === id && job.status === 'submitting')) throw new Error('This draft has an active provider submission. Reconcile its outcome before editing.');
-    const masterChanged = draft.title !== generatedInput.title || draft.body !== generatedInput.body;
+    const masterChanged = draft.title !== generatedInput.title || draft.body !== generatedInput.body || (generatedInput.document !== undefined && JSON.stringify(draft.document) !== JSON.stringify(generatedInput.document));
+    generatedInput.document ??= draft.body === generatedInput.body ? draft.document : documentFromText(generatedInput.body);
     Object.assign(draft, validGenerated(draft.brief, generatedInput), { adaptationStatus: operationId ? 'current' : masterChanged ? 'pending' : draft.adaptationStatus, revision: draft.revision + 1, approvedHash: null, lastOperationId: operationId, ...(appliedProposalId ? { lastAppliedProposalId: appliedProposalId } : {}) });
     return draft;
   });
@@ -167,6 +179,7 @@ export async function scheduleJob(input: { draftId: string; accountId: string; s
 }
 
 function orphaned(job: Job): boolean {
+  if (job.status === 'submitting' && job.submissionLeaseUntil) return Date.parse(job.submissionLeaseUntil) <= Date.now();
   if (job.status !== 'submitting') return false;
   if (job.submissionOwner === owner) return !activeSubmissions.has(job.id);
   if (!job.submissionOwner || !job.submissionStartedAt) return true;
@@ -197,8 +210,9 @@ async function dispatchDue(): Promise<Job[]> {
     try {
       const claimed = await mutateState(async state => {
         const job = findJob(state, id);
-        if (state.paused || job.status !== 'scheduled') return null;
-        const draft = findDraft(state, job.draftId); const account = findAccount(state, job.accountId); const variant = variantFor(draft, job.platform);
+        if (state.paused || job.status !== 'scheduled' || job.subject?.kind === 'video') return null;
+        if (state.jobs.some(other => other.id !== id && other.accountId === job.accountId && ['submitting', 'needs_reconciliation'].includes(other.status))) return null;
+        const draft = findDraft(state, requireArticleId(job)); const account = findAccount(state, job.accountId); const variant = variantFor(draft, job.platform);
         try {
           if (account.status !== 'connected') throw new Error('Target account is no longer connected.');
           await verifyApproval(draft, variant, account, job); await validateMedia(variant);
@@ -222,7 +236,7 @@ async function dispatchDue(): Promise<Job[]> {
         const job = findJob(state, id);
         if (state.paused) { transition(job, 'scheduled', 'Publishing paused before provider submission.'); return null; }
         if (job.status !== 'submitting' || job.submissionOwner !== owner) return null;
-        const draft = findDraft(state, job.draftId); const account = findAccount(state, job.accountId); const variant = variantFor(draft, job.platform);
+        const draft = findDraft(state, requireArticleId(job)); const account = findAccount(state, job.accountId); const variant = variantFor(draft, job.platform);
         try {
           if (account.status !== 'connected') throw new Error('Target account is no longer connected.');
           await verifyApproval(draft, variant, account, job); await validateMedia(variant); validatePostizVariant(account, variant);
@@ -307,7 +321,7 @@ export async function cancelJob(id: string): Promise<Job> {
   });
 }
 export async function reconcileJob(id: string): Promise<Job> {
-  const state = await readState(); const job = findJob(state, id); const draft = job.snapshot?.draft ?? findDraft(state, job.draftId); const account = job.snapshot?.account ?? findAccount(state, job.accountId); const variant = job.snapshot?.variant ?? variantFor(draft, job.platform);
+  const state = await readState(); const job = findJob(state, id); const draft = job.snapshot?.draft ?? findDraft(state, requireArticleId(job)); const account = job.snapshot?.account ?? findAccount(state, job.accountId); const variant = job.snapshot?.variant ?? variantFor(draft, job.platform);
   if (job.provider !== 'postiz' || !(['queued', 'needs_reconciliation'].includes(job.status) || (job.status === 'failed' && job.providerPostId))) throw new Error('This job needs a native publication receipt or is not ready for Postiz reconciliation.');
   if (!job.providerPostId && job.approvedHash !== targetHash(draft, variant, account)) throw new Error('Content or target changed after the unknown submission. Inspect the provider and record its exact publication receipt.');
   const posts = await listRemotePosts(job);
@@ -326,8 +340,14 @@ export async function reconcileJob(id: string): Promise<Job> {
     return currentJob;
   });
 }
-export async function exportJob(id: string): Promise<{ job: Job; account: Account; draft: Draft; variant: Variant; nativeUrl: string }> {
-  const state = await readState(); const job = findJob(state, id); const draft = job.snapshot?.draft ?? findDraft(state, job.draftId); const account = job.snapshot?.account ?? findAccount(state, job.accountId); const variant = job.snapshot?.variant ?? variantFor(draft, job.platform);
+export async function exportJob(id: string): Promise<{ job: Job; account: Account; draft?: Draft; variant: Variant; nativeUrl: string }> {
+  const state = await readState(); const job = findJob(state, id);
+  if (job.snapshot?.video) {
+    const { verifyVideoDeliveryApproval } = await import('./video-delivery.ts'); await verifyVideoDeliveryApproval(job, { historical: true });
+    await validateMedia(job.snapshot.variant);
+    return { job, account: job.snapshot.account, variant: job.snapshot.variant, nativeUrl: nativeUrls[job.platform] };
+  }
+  const draft = job.snapshot?.draft ?? findDraft(state, requireArticleId(job)); const account = job.snapshot?.account ?? findAccount(state, job.accountId); const variant = job.snapshot?.variant ?? variantFor(draft, job.platform);
   await verifyApproval(draft, variant, account, job); await validateMedia(variant);
   return { job, account, draft, variant, nativeUrl: nativeUrls[job.platform] };
 }
@@ -375,8 +395,16 @@ export async function retryFailedPublication(id: string): Promise<Job> {
     if (job.status !== 'failed') return job;
     if (job.providerPostId || job.remoteId || job.remoteUrl) throw new Error('This submission has a remote identity. Reconcile it before retrying.');
     if (await hasYouTubeUploadJournal(job)) throw new Error('A durable YouTube upload journal exists. Reconcile the saved upload; do not retry it as a new submission.');
-    const draft = findDraft(state, job.draftId); const account = findAccount(state, job.accountId); const variant = variantFor(draft, job.platform);
-    await verifyApproval(draft, variant, account, job); await validateMedia(variant);
+    const account = findAccount(state, job.accountId);
+    if (job.subject?.kind === 'video') {
+      const { verifyVideoDeliveryApproval } = await import('./video-delivery.ts');
+      await verifyVideoDeliveryApproval(job);
+      if (!job.snapshot?.video || JSON.stringify(account) !== JSON.stringify(job.snapshot.account)) throw new Error('Target account changed. Review and approve the video again.');
+      await validateMedia(job.snapshot.variant);
+    } else {
+      const draft = findDraft(state, requireArticleId(job)); const variant = variantFor(draft, job.platform);
+      await verifyApproval(draft, variant, account, job); await validateMedia(variant);
+    }
     if (account.status !== 'connected') throw new Error('Connect the selected account before retrying.');
     transition(job, 'scheduled', 'Retrying the same unfinished publication; no new job was created.'); job.scheduledAt = now(); return job;
   });

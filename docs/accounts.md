@@ -4,6 +4,23 @@ Required identity: **Chrome profile `radarxai@gmail.com`** for Google sign-in, S
 
 Observed on 2026-10-10: Chrome displayed `coding (radarxai@gmail.com)` and an authenticated Supabase dashboard. The existing `radar` organization displayed **EXCEEDING USAGE LIMITS** and “Grace period is over”, while its project showed Healthy. This is point-in-time UI evidence; it does not establish capacity for a new project. No existing radar database was modified for Content Studio.
 
+## Current Docker account setup: 2026-10-11
+
+The deployed runtime uses the supported [Docker lifecycle](docker-runtime.md); the native npm/CLI instructions below are historical migration evidence. All account and credential operations run in containers. Keep Chrome profile `radarxai@gmail.com` verified before this owner's Google actions. Browser login and API authorization remain separate.
+
+Existing YouTube credentials are private `delivery-private/youtube/secrets/client.json` and `token.json` under the configured bind root, mounted only into delivery workers at `/data/youtube/secrets`. The current instance retained these files and its two original journal bodies; the Web read-only authorization check returned the exact expected channel without a new grant or upload. A default portable restore omits private credentials and journals, leaves protected journal markers and publication paused, and requires explicit authorization or an approved private transfer before automatic uploads.
+
+For a new computer or expired consent, download the intended Desktop client JSON privately, then run:
+
+```sh
+sh scripts/docker.sh youtube-auth --root /absolute/private-root \
+  --client-file /absolute/private-desktop-client.json --callback-port 8765
+```
+
+This one-off delivery container publishes only `127.0.0.1:8765:8765`; another unoccupied port may be selected. It binds the callback inside the container but advertises the host loopback address. Open the printed official Google URL in the verified browser profile, review only upload and read-only scopes, and complete consent yourself. State, PKCE and exact Host validation remain required. Credentials stay in the private delivery mount; no token or client JSON is printed. The Web “check existing YouTube API authorization” button dispatches a read-only channel check to the delivery worker. This runtime check passed; a new grant was not exercised during this acceptance. Production Web OAuth remains a later phase.
+
+Local intake accepts assets up to 500 MiB. Reviewed MP4 upload remains size-bounded and streams 8 MiB chunks; explicit interrupted-upload continuation reuses the same existing session. Unknown outcomes and protected restored journals require reconciliation, never a replacement upload. The Docker-only runtime needs no host Node, Codex, Supabase CLI, macOS service or Keychain.
+
 ## Latest four-account verification: 2026-10-10
 
 The user completed registration/login. In Chrome profile `coding (radarxai@gmail.com)`, current native UI checks confirmed X `@radarxai`, YouTube `RadarXAI` with channel `UCVUtH6reLkEuMrUuTh-XgjQ`, Xiaohongshu `ziv` with account `63520392304`, and Reddit `u/radarxai26`. This supersedes the earlier registration blockers below; it does not establish OAuth or automated publishing permission. The new AI-agent education video is public; the previous topic was reversibly withdrawn to Private. X, Reddit and Xiaohongshu remain unsubmitted.

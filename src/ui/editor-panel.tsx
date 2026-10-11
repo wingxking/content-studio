@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { articleText, type ArticleDocument } from '../core/article-document.ts';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { Account, Draft, Generated, Job, Platform, Variant } from '../core/model.ts';
 import { type Asset, type CodexModel, type DownloadFile, type RunAction, errorMessage, labels, request, statusLabel, uploadAsset } from './api.ts';
 import { AssetPicker } from './assets.tsx';
 import { PublishPanel } from './publish-panel.tsx';
 
+const ArticleEditor = lazy(() => import('./article-editor.tsx').then(module => ({ default: module.ArticleEditor })));
 type Operation = { id: string; kind: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; phase: string; error: string | null; input?: { expectedRevision?: number }; output: { proposal?: Generated; conflicts?: string[]; applied?: boolean } | null; createdAt: string };
 type VideoProject = { id: string; draftId: string; platform: Platform; title: string; narration: string; assetIds: string[]; revision: number; sourceRevision: number; status: string; mediaPaths: string[]; renderedRevision?: number | null; error: string | null };
 type DraftRevision = { revision: number; createdAt: string; title: string; body: string; variants: Variant[] };
@@ -11,17 +13,16 @@ type EditorState = { draft: Draft; history: DraftRevision[]; operations: Operati
 const videoPlatforms: Platform[] = ['youtube', 'tiktok', 'bilibili', 'kuaishou', 'douyin'];
 
 export function DraftPanel({ draft, accounts, jobs, models, assets, onUpload, busy, action }: { draft: Draft; accounts: Account[]; jobs: Job[]; models: CodexModel[]; assets: Asset[]; onUpload: (asset: Asset) => void; busy: boolean; action: RunAction }) {
+  const [document, setDocument] = useState<ArticleDocument | undefined>(draft.document);
   const [base, setBase] = useState(draft); const [title, setTitle] = useState(draft.title); const [body, setBody] = useState(draft.body); const [variants, setVariants] = useState(draft.variants);
   const [platform, setPlatform] = useState<Platform>(draft.variants[0]?.platform ?? 'x');
   const [editor, setEditor] = useState<EditorState | null>(null); const [files, setFiles] = useState<DownloadFile[]>([]); const [editorError, setEditorError] = useState('');
   const [prompt, setPrompt] = useState(''); const [scope, setScope] = useState<'master' | Platform>('master'); const [model, setModel] = useState(draft.generationModel ?? ''); const [assetIds, setAssetIds] = useState<string[]>([]); const [attachIds, setAttachIds] = useState<string[]>([]);
   const [operation, setOperation] = useState<Operation | null>(null);
-  const availableVideoPlatforms = draft.variants.map(item => item.platform).filter(item => videoPlatforms.includes(item));
-  const [videoPrompt, setVideoPrompt] = useState(''); const [videoPlatform, setVideoPlatform] = useState<Platform>(availableVideoPlatforms[0] ?? 'youtube');
-  const dirty = title !== base.title || body !== base.body || JSON.stringify(variants) !== JSON.stringify(base.variants);
+  const dirty = title !== base.title || body !== base.body || JSON.stringify(document) !== JSON.stringify(base.document) || JSON.stringify(variants) !== JSON.stringify(base.variants);
   const concurrent = draft.revision !== base.revision;
   const running = operation?.status === 'queued' || operation?.status === 'running' || editor?.operations.some(item => ['queued', 'running'].includes(item.status)) === true;
-  const reset = (next: Draft) => { setBase(next); setTitle(next.title); setBody(next.body); setVariants(next.variants); };
+  const reset = (next: Draft) => { setBase(next); setTitle(next.title); setBody(next.body); setDocument(next.document); setVariants(next.variants); };
   useEffect(() => { if (draft.revision !== base.revision && !dirty) reset(draft); }, [draft.revision, base.revision, dirty]);
   useEffect(() => {
     let active = true; let fetching = false;
@@ -44,12 +45,12 @@ export function DraftPanel({ draft, accounts, jobs, models, assets, onUpload, bu
   useEffect(() => { if (!operation || !['queued', 'running'].includes(operation.status)) return; let active = true; const poll = () => { void request<Operation>(`operations/${operation.id}`).then(next => { if (active) setOperation(next); }).catch(caught => { if (active) setEditorError(errorMessage(caught)); }); }; const timer = window.setInterval(poll, 2000); poll(); return () => { active = false; window.clearInterval(timer); }; }, [operation?.id, operation?.status]);
   const variant = variants.find(item => item.platform === platform);
   const editVariant = (next: Partial<Variant>) => setVariants(items => items.map(item => item.platform === platform ? { ...item, ...next } : item));
-  const save = () => action(async () => { const next = await request<Draft>(`drafts/${draft.id}`, { title, body, variants, expectedRevision: base.revision, model: model || models[0]?.id }, 'PUT'); reset(next); }, '稿件已保存。原稿变化会同步平台版本，独立手改的内容保留。请核对最新适配稿。');
+  const save = () => action(async () => { const next = await request<Draft>(`drafts/${draft.id}`, { title, body, document, variants, expectedRevision: base.revision, model: model || models[0]?.id }, 'PUT'); reset(next); }, '稿件已保存。原稿变化会同步平台版本，独立手改的内容保留。请核对最新适配稿。');
   const startOperation = (path: string, input: unknown, message: string) => action(async () => { const next = await request<Operation>(path, input); setOperation(next); }, message);
   const upload = (file: File) => action(async () => { const result = await uploadAsset(file); onUpload(result.asset); editVariant({ mediaPaths: [...(variant?.mediaPaths ?? []), result.path] }); }, '素材已上传并附到当前平台。请保存稿件。');
   return <article className="panel draft-panel"><div className="panel-heading"><div><h2>原稿与平台适配稿</h2><p className="hint">同一创作包，保留每个版本的独立编辑。</p></div><span className={`badge ${draft.approvedHash && !dirty && !concurrent ? 'green' : ''}`}>{draft.approvedHash && !dirty && !concurrent ? '已批准' : '待审核'} · r{base.revision}</span></div>
     {concurrent && dirty && <div className="alert error" role="alert">稿件已更新到 r{draft.revision}，当前编辑仍保留。请先复制需要保留的修改，再加载最新版。<button onClick={() => reset(draft)}>加载最新版并放弃本页未保存修改</button></div>}
-    <label>原稿标题<input value={title} onChange={event => setTitle(event.target.value)}/></label><label>原稿正文<textarea rows={9} value={body} onChange={event => setBody(event.target.value)}/></label>
+    <label>原稿标题<input value={title} onChange={event => setTitle(event.target.value)}/></label><label>Original article</label><Suspense fallback={<p className="hint">Loading article editor…</p>}><ArticleEditor document={document} body={body} sources={draft.brief.sources} assets={assets} disabled={busy || concurrent} onChange={next => { setDocument(next); setBody(articleText(next)); }}/></Suspense><details><summary>Plain text preview</summary><pre className="content-preview">{body}</pre></details>
     <details><summary>原始来源 · {draft.brief.sources.length} 个</summary><ul className="source-links">{draft.brief.sources.map(source => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a><p>{source.excerpt}</p></li>)}</ul></details>
     <div className="variant-tabs" role="group" aria-label="平台适配稿">{variants.map(item => <button className={platform === item.platform ? 'selected' : ''} key={item.platform} onClick={() => setPlatform(item.platform)}>{labels[item.platform]}</button>)}</div>
     {variant && <section className="platform-editor"><div className="section-label"><h3>{labels[platform]} 适配稿</h3><span>在这里微调，原稿更新时保留手改</span></div><label>平台标题<input value={variant.title} onChange={event => editVariant({ title: event.target.value })}/></label><label>平台正文<textarea rows={8} value={variant.text} onChange={event => editVariant({ text: event.target.value })}/></label><label>标签 · 逗号分隔<input value={variant.tags.join(', ')} onChange={event => editVariant({ tags: event.target.value.split(/[,，]/).map(tag => tag.trim()).filter(Boolean) })}/></label>
@@ -62,7 +63,7 @@ export function DraftPanel({ draft, accounts, jobs, models, assets, onUpload, bu
       {editor && editor.operations.length > 0 && <details><summary>AI 操作记录 · {editor.operations.length} 次</summary><div className="operation-history">{editor.operations.map(item => <button key={item.id} disabled={running} onClick={() => setOperation(item)}><strong>{item.kind} · {statusLabel(item.status)}</strong><small>{new Date(item.createdAt).toLocaleString('zh-CN')}</small></button>)}</div></details>}
       {operation && <OperationCard operation={operation} busy={busy} applyBlocked={dirty || concurrent} action={action} revision={base.revision} onChange={setOperation}/>}
     </section>
-    <details className="video-workspace"><summary>独立视频稿件 · {editor?.videos.length ?? 0} 个 · 手动创建</summary><p className="hint">文章生成不会自动制作视频。单独创建脚本、编辑解说，再手动渲染和附加到平台稿件。</p><div className="form-row"><label>视频平台<select value={videoPlatform} onChange={event => setVideoPlatform(event.target.value as Platform)}>{availableVideoPlatforms.map(item => <option key={item} value={item}>{labels[item]}</option>)}</select></label><label>视频创作指令<textarea rows={2} maxLength={4000} value={videoPrompt} onChange={event => setVideoPrompt(event.target.value)} placeholder="说明时长、画面、解说和所选参考素材的用途"/></label></div>{!availableVideoPlatforms.length && <p className="hint">此创作包没有视频平台，请先在任务中添加一个视频目标平台并重新运行。</p>}<p className="hint">视频使用上方选择的模型及调优参考素材（{assetIds.length} 个）。</p><button disabled={busy || running || dirty || concurrent || !models.length || !availableVideoPlatforms.length || videoPrompt.trim().length < 3} onClick={() => void startOperation(`drafts/${draft.id}/videos`, { platform: videoPlatform, prompt: videoPrompt, model: model || models[0]?.id, assetIds }, '已请求创建独立视频脚本，请等待 Codex 完成。')}>手动创建视频脚本</button>{editor?.videos.map(video => <VideoEditor key={`${video.id}-${video.revision}`} video={video} assets={assets} onUpload={onUpload} draftRevision={base.revision} busy={busy || running || dirty || concurrent} action={action} onOperation={setOperation}/>)}</details>
+    {editor?.videos.length ? <details><summary>Legacy linked videos · {editor.videos.length}</summary>{editor.videos.map(video => <VideoEditor key={`${video.id}-${video.revision}`} video={video} assets={assets} onUpload={onUpload} draftRevision={base.revision} busy={busy || running || dirty || concurrent} action={action} onOperation={setOperation}/>)}</details> : null}
     {editor && <details className="revision-history"><summary>稿件历史 · {editor.history.length} 个快照{editor.syncStatus ? ` · ${{ current: '同步完成', syncing: '同步中', conflict: '已保留独立修改', needs_sync: '需要重试同步' }[editor.syncStatus] ?? editor.syncStatus}` : ''}</summary>{editor.history.toSorted((left, right) => right.revision - left.revision).map(item => <details key={item.revision}><summary>r{item.revision} · {item.title} · {new Date(item.createdAt).toLocaleString('zh-CN')}</summary><pre className="content-preview">{item.body}</pre>{item.variants.map(itemVariant => <details key={itemVariant.platform}><summary>{labels[itemVariant.platform]} 版本</summary><pre className="content-preview">{itemVariant.text}</pre></details>)}</details>)}</details>}
     {draft.adaptationStatus === 'pending' && <p className="hint" role="status">原稿已更新，平台适配稿正在同步。同步失败时点击“更新平台适配稿”重试，完成后即可发布。</p>}
     <PublishPanel draft={draft} accounts={accounts} jobs={jobs} busy={busy} dirty={dirty || concurrent || draft.adaptationStatus === 'pending'} action={action}/>

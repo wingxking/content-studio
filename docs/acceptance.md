@@ -111,3 +111,8 @@ The original design requirements below are implemented in the local Web applicat
 - [ ] Complete the remaining end-to-end Chrome click-through after the owner foregrounds the local application in the specified profile.
 
 - Final `local:upgrade` applied migrations 001–006 as a no-op and created a fresh complete backup with 15 Storage objects, 109 media files, 104 content/run artifacts and two encrypted upload journals. Final build/start/HTTP smoke passed; database/pgmq/cron are healthy. Restart retained draft r7 and the three native handoff jobs with zero attempts. Publishing remains paused and both acceptance task schedules are disabled.
+
+
+## Subsequent portable Docker implementation
+
+The deployed target now uses Docker for all local services. See [Docker runtime delivery](docker-runtime.md) for current source contracts, actual ARM bilingual CPU render and fresh D0 recovery evidence, supported private backup transfer and remaining acceptance gates. Historical native runtime/model/publication evidence above is not Docker acceptance. Authenticated Linux Codex structured/image execution has passed in Docker. Final source verification passed 176 tests, strict TypeScript and a production build; live PostgreSQL cancellation/schema checks and Docker public-source fetching also passed. Docker/Chrome acceptance now includes source-backed article generation, merge-preserving synchronization, scoped refinement, scheduled discovery and upload restart recovery. Final rebuilt-image acceptance passed with all 13 services, a fresh standalone Sol-generated script and decoded/download-hash-verified video, the separate model catalog, read-only YouTube verification and the requested Chrome profile. The 48-hour burn-in is still pending.

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { type Asset, errorMessage, uploadAsset } from './api.ts';
+import { type Asset, errorMessage, request, uploadAsset } from './api.ts';
 
 export function AssetPicker({ assets, selected, onChange, onUpload, disabled = false, imagesOnly = true, maxSelected = 12 }: { assets: Asset[]; selected: string[]; onChange: (ids: string[]) => void; onUpload: (asset: Asset) => void; disabled?: boolean; imagesOnly?: boolean; maxSelected?: number }) {
   const [uploading, setUploading] = useState(false);
@@ -23,6 +23,7 @@ export function AssetPicker({ assets, selected, onChange, onUpload, disabled = f
 }
 
 export function AssetsPanel({ assets, onUpload }: { assets: Asset[]; onUpload: (asset: Asset) => void }) {
-  const [selected, setSelected] = useState<string[]>([]);
-  return <><section className="intro"><span className="eyebrow">MEDIA LIBRARY</span><h1>素材在这里，创作随时引用。</h1><p>统一管理上传素材。任务、AI 调优和视频稿件可以选取同一张图片。</p></section><section className="panel"><AssetPicker assets={assets} selected={selected} onChange={setSelected} onUpload={onUpload} imagesOnly={false} maxSelected={500}/><div className="asset-downloads">{assets.filter(asset => selected.includes(asset.id)).map(asset => <a key={asset.id} className="button" href={asset.url} download={asset.name}>下载 {asset.name} ↗</a>)}</div></section></>;
+  const [selected, setSelected] = useState<string[]>([]); const [error, setError] = useState(''); const [adapting, setAdapting] = useState(false);
+  const adapt = async (asset: Asset) => { setAdapting(true); setError(''); try { const result = await request<{ asset: Asset }>(`assets/${asset.id}/adapt`, { width: 1080, height: 1440, fit: 'cover', format: 'webp', quality: 85 }); onUpload(result.asset); } catch (caught) { setError(errorMessage(caught)); } finally { setAdapting(false); } };
+  return <><section className="intro"><span className="eyebrow">MEDIA LIBRARY</span><h1>素材在这里，创作随时引用。</h1><p>统一管理上传素材。任务、AI 调优和视频稿件可以选取同一张图片。</p></section><section className="panel"><AssetPicker assets={assets} selected={selected} onChange={setSelected} onUpload={onUpload} imagesOnly={false} maxSelected={500}/>{error && <p className="inline-error" role="alert">{error}</p>}<div className="asset-downloads">{assets.filter(asset => selected.includes(asset.id)).map(asset => <span key={asset.id}><a className="button" href={asset.url} download={asset.name}>下载 {asset.name} ↗</a>{asset.mime.startsWith('image/') && <button disabled={adapting} onClick={() => void adapt(asset)}>Create 1080×1440 cover</button>}</span>)}</div></section></>;
 }

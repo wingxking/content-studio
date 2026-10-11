@@ -6,3 +6,8 @@ dist/
 .studio/
 *.log
 .DS_Store
+
+.docker/
+.docker-backups/
+
+.docker-*/

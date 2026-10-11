@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { readFile, stat } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { markYouTubeJournalPresence } from './publication-journal.ts';
 import { type Job, type StudioState } from './model.ts';
 import { exportJob, verifyDraftApproval } from './pipeline.ts';
 import { resolveMediaLocation } from './media-location.ts';
@@ -13,14 +15,14 @@ export const expectedYouTubeChannelId = 'UCVUtH6reLkEuMrUuTh-XgjQ';
 export const youtubeSettingsSchema = z.object({ privacyStatus: z.enum(['public', 'unlisted', 'private']), selfDeclaredMadeForKids: z.boolean(), containsSyntheticMedia: z.boolean(), categoryId: z.string().regex(/^\d+$/), defaultLanguage: z.string().min(2).max(20), descriptionDisclosure: z.string().trim().min(10).max(1000) }).strict();
 type Settings = z.infer<typeof youtubeSettingsSchema>;
 const videoIdSchema = z.string().regex(/^[\w-]{11}$/);
-const journalSchema = z.object({ version: z.literal(1), jobId: z.uuid(), channelId: z.literal(expectedYouTubeChannelId), approvedHash: z.string(), mediaHash: z.string(), mediaBytes: z.number().int().positive(), metadata: z.object({ snippet: z.object({ title: z.string(), description: z.string(), tags: z.array(z.string()), categoryId: z.string(), defaultLanguage: z.string() }), status: youtubeSettingsSchema.omit({ categoryId: true, defaultLanguage: true, descriptionDisclosure: true }) }), phase: z.enum(['starting', 'session_ready', 'sending', 'uploaded', 'needs_reconciliation']), sessionUrl: z.string().nullable(), videoId: videoIdSchema.nullable(), at: z.iso.datetime() });
+const journalSchema = z.object({ version: z.literal(1), jobId: z.uuid(), channelId: z.literal(expectedYouTubeChannelId), approvedHash: z.string(), mediaHash: z.string(), mediaBytes: z.number().int().positive(), offset: z.number().int().nonnegative().default(0), metadata: z.object({ snippet: z.object({ title: z.string(), description: z.string(), tags: z.array(z.string()), categoryId: z.string(), defaultLanguage: z.string() }), status: youtubeSettingsSchema.omit({ categoryId: true, defaultLanguage: true, descriptionDisclosure: true }) }), phase: z.enum(['starting', 'session_ready', 'sending', 'uploaded', 'needs_reconciliation']), sessionUrl: z.string().nullable(), videoId: videoIdSchema.nullable(), at: z.iso.datetime() });
 type Journal = z.infer<typeof journalSchema>;
 type Transport = { fetcher?: typeof fetch; tokenProvider?: () => Promise<string> };
 const now = (): string => new Date().toISOString();
 const privateRoot = (): string => join(dataDirectory(), 'youtube');
 const journalPath = (jobId: string): string => join(privateRoot(), 'uploads', `${z.uuid().parse(jobId)}.json`);
 const findJob = (state: StudioState, id: string): Job => { const job = state.jobs.find(item => item.id === id); if (!job) throw new Error('Job not found.'); return job; };
-function move(job: Job, status: Job['status'], message: string): void { job.status = status; job.error = status === 'needs_reconciliation' || status === 'failed' ? message : null; job.submissionOwner = null; job.history.push({ at: now(), status, message }); }
+function move(job: Job, status: Job['status'], message: string): void { job.status = status; job.error = status === 'needs_reconciliation' || status === 'failed' ? message : null; job.submissionOwner = null; job.submissionLeaseUntil = null; job.history.push({ at: now(), status, message }); }
 function transport(input: Transport): { fetcher: typeof fetch; tokenProvider: () => Promise<string> } { const fetcher = input.fetcher ?? fetch; return { fetcher, tokenProvider: input.tokenProvider ?? desktopYouTubeTokenProvider(join(privateRoot(), 'secrets'), fetcher) }; }
 async function boundTransport(input: Transport): Promise<ReturnType<typeof transport>> {
   const io = transport(input);
@@ -32,7 +34,7 @@ async function boundTransport(input: Transport): Promise<ReturnType<typeof trans
 function journalMatchesJob(job: Job, journal: Journal): boolean {
   return job.id === journal.jobId && job.platform === 'youtube' && job.provider === 'native' && job.approvedHash === journal.approvedHash
     && job.snapshot?.account.id === job.accountId && job.snapshot.account.integrationId === journal.channelId
-    && job.snapshot.account.platform === 'youtube' && job.snapshot.account.provider === 'native' && job.snapshot.draft.id === job.draftId
+    && job.snapshot.account.platform === 'youtube' && job.snapshot.account.provider === 'native' && (job.snapshot.video ? job.snapshot.video.projectId === job.subject?.id && job.subject.kind === 'video' : job.snapshot.draft?.id === job.draftId)
     && (!job.providerPostId || !journal.videoId || job.providerPostId === journal.videoId)
     && (!job.remoteId || !journal.videoId || job.remoteId === journal.videoId);
 }
@@ -41,6 +43,7 @@ function jobFingerprint(job: Job): string {
     job.providerPostId, job.remoteId, job.remoteUrl, job.submissionOwner, job.submissionStartedAt, job.history.length]);
 }
 function liveSubmissionOwner(job: Job): boolean {
+  if (job.status === 'submitting' && job.submissionLeaseUntil) return Date.parse(job.submissionLeaseUntil) > Date.now();
   if (job.status !== 'submitting' || !job.submissionOwner) return false;
   const [host, pid] = job.submissionOwner.split(':');
   if (host !== hostname() || !pid || !/^\d+$/.test(pid) || !Number.isSafeInteger(Number(pid)) || Number(pid) <= 0) return false;
@@ -69,7 +72,7 @@ async function loadJournal(id: string): Promise<Journal | null> {
   try { return journalSchema.parse(saved); }
   catch { throw new Error('YouTube upload journal is invalid; preserve it and inspect before any upload.'); }
 }
-async function saveJournal(journal: Journal): Promise<void> { await writePrivateJson(journalPath(journal.jobId), journalSchema.parse({ ...journal, at: now() })); }
+async function saveJournal(journal: Journal): Promise<void> { await markYouTubeJournalPresence(journal.jobId); await writePrivateJson(journalPath(journal.jobId), journalSchema.parse({ ...journal, at: now() })); }
 async function failUnknown(id: string, expectedFingerprint?: string, submissionOwner?: string): Promise<Job> {
   return mutateState(state => {
     const job = findJob(state, id);
@@ -82,46 +85,125 @@ async function failUnknown(id: string, expectedFingerprint?: string, submissionO
 async function verifyCurrent(state: StudioState, job: Job): Promise<void> {
   if (state.paused) throw new Error('Publishing is paused.');
   const snapshot = job.snapshot; const draft = state.drafts.find(item => item.id === job.draftId); const account = state.accounts.find(item => item.id === job.accountId);
-  if (!snapshot || !draft || !account || job.platform !== 'youtube' || job.provider !== 'native' || account.platform !== 'youtube' || account.provider !== 'native' || account.status !== 'connected' || account.integrationId !== expectedYouTubeChannelId) throw new Error('Use a connected native YouTube account with the verified channel ID and an immutable job snapshot.');
+  if (!snapshot || (!draft && !snapshot.video) || !account || job.platform !== 'youtube' || job.provider !== 'native' || account.platform !== 'youtube' || account.provider !== 'native' || account.status !== 'connected' || account.integrationId !== expectedYouTubeChannelId) throw new Error('Use a connected native YouTube account with the verified channel ID and an immutable job snapshot.');
+  if (snapshot.video) {
+    const { verifyVideoDeliveryApproval } = await import('./video-delivery.ts');
+    await verifyVideoDeliveryApproval(job);
+    if (account.id !== snapshot.account.id || account.label !== snapshot.account.label || account.integrationId !== snapshot.account.integrationId) throw new Error('Video target account changed; approve it again.');
+    return;
+  }
+  if (!snapshot.draft) throw new Error('Article approval snapshot is missing.');
+  if (!draft) throw new Error('Draft not found.');
   await verifyDraftApproval(draft);
   if (draft.approvedHash !== snapshot.draft.approvedHash || draft.revision !== snapshot.draft.revision || account.id !== snapshot.account.id || account.label !== snapshot.account.label || account.integrationId !== snapshot.account.integrationId || account.provider !== snapshot.account.provider || account.platform !== snapshot.account.platform) throw new Error('Draft/media approval or account target changed; schedule the reviewed version.');
+}
+export async function hashMedia(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  return hash.digest('hex');
+}
+function assertAccountAvailable(state: StudioState, job: Job): void {
+  if (state.jobs.some(other => other.id !== job.id && other.accountId === job.accountId && ['submitting', 'needs_reconciliation'].includes(other.status))) throw new Error('Another publication owns this account or has an unknown outcome. Reconcile it first.');
+}
+const chunkBytes = 8 * 1024 * 1024;
+function confirmedOffset(response: Response, bytes: number): number {
+  const range = response.headers.get('Range');
+  if (!range) return 0;
+  const match = /^bytes=0-([0-9]+)$/.exec(range);
+  const offset = match?.[1] ? Number(match[1]) + 1 : NaN;
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes) throw new Error('Upload session returned an invalid offset.');
+  return offset;
+}
+async function sendChunks(journal: Journal, path: string, io: ReturnType<typeof transport>, verifyOwner: () => Promise<void>): Promise<{ id: string }> {
+  if (!journal.sessionUrl) throw new Error('No resumable session exists.');
+  const file = await open(path, 'r');
+  try {
+    while (journal.offset < journal.mediaBytes) {
+      await verifyOwner();
+      const offset = journal.offset; const length = Math.min(chunkBytes, journal.mediaBytes - offset);
+      const buffer = Buffer.alloc(length); const { bytesRead } = await file.read(buffer, 0, length, offset);
+      if (bytesRead !== length) throw new Error('Approved video changed or became unavailable.');
+      journal.phase = 'sending'; await saveJournal(journal);
+      const reply = await call(validatedSession(journal.sessionUrl), { method: 'PUT', headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(length), 'Content-Range': `bytes ${offset}-${offset + length - 1}/${journal.mediaBytes}` }, body: new Uint8Array(buffer).buffer }, io);
+      if ([200, 201].includes(reply.status)) {
+        const result = await parsed(reply, z.object({ id: videoIdSchema })); journal.offset = journal.mediaBytes; journal.videoId = result.id; journal.phase = 'uploaded'; await saveJournal(journal); return result;
+      }
+      if (reply.status !== 308) throw new Error('Upload chunk outcome requires session reconciliation.');
+      const acknowledged = confirmedOffset(reply, journal.mediaBytes);
+      if (acknowledged <= offset || acknowledged > offset + length) throw new Error('Upload session did not acknowledge this chunk.');
+      journal.offset = acknowledged; await saveJournal(journal);
+    }
+    throw new Error('Upload has no final video receipt. Reconcile the existing session.');
+  } finally { await file.close(); }
+}
+function renewSubmissionLease(id: string, owner: string): { stop: () => void; assert: () => void } {
+  let busy = false; let failure: Error | null = null;
+  const timer = setInterval(() => { if (busy) return; busy = true; void mutateState(state => { const job = findJob(state, id); if (job.status !== 'submitting' || job.submissionOwner !== owner) throw new Error('Upload ownership changed.'); job.submissionLeaseUntil = new Date(Date.now() + 180000).toISOString(); }).catch(() => { failure = new Error('Upload lease renewal failed; reconcile the existing session.'); }).finally(() => { busy = false; }); }, 10000); timer.unref();
+  return { stop: () => clearInterval(timer), assert: () => { if (failure) throw failure; } };
+}
+// Explicit continuation only: probe the existing session, retain the same job/session, never insert another video.
+export async function resumeYouTubeJob(id: string, input: Transport = {}): Promise<Job> {
+  const journal = await loadJournal(id); if (!journal?.sessionUrl || journal.videoId) return reconcileYouTubeJob(id, input);
+  const job = findJob(await readState(), id);
+  if (!journalMatchesJob(job, journal) || liveSubmissionOwner(job)) throw new Error('Saved upload is mismatched or still owned.');
+  const io = await boundTransport(input); await verifyYouTubeChannel(io);
+  const probe = await call(validatedSession(journal.sessionUrl), { method: 'PUT', headers: { 'Content-Length': '0', 'Content-Range': `bytes */${journal.mediaBytes}` } }, io);
+  if ([200, 201].includes(probe.status)) { journal.videoId = (await parsed(probe, z.object({ id: videoIdSchema }))).id; journal.phase = 'uploaded'; await saveJournal(journal); return reconcileYouTubeJob(id, io); }
+  if (probe.status !== 308) return failUnknown(id);
+  const bundle = await exportJob(id);
+  await verifyCurrent(await readState(), bundle.job);
+  const media = await Promise.all(bundle.variant.mediaPaths.map(resolveMediaLocation)); const files: string[] = [];
+  for (const path of media) { const file = await open(path, 'r'); const header = Buffer.alloc(8); try { await file.read(header, 0, 8, 0); } finally { await file.close(); } if (header.toString('ascii', 4, 8) === 'ftyp') files.push(path); }
+  if (files.length !== 1 || !files[0] || await hashMedia(files[0]) !== journal.mediaHash || (await stat(files[0])).size !== journal.mediaBytes) throw new Error('Saved upload media changed; review it before any continuation.');
+  const path = files[0]; const owner = `${hostname()}:${process.pid}:${randomUUID()}`;
+  await mutateState(async state => { const current = findJob(state, id); if (jobFingerprint(current) !== jobFingerprint(job)) throw new Error('Job changed during recovery.'); await verifyCurrent(state, current); assertAccountAvailable(state, current); current.status = 'submitting'; current.submissionOwner = owner; current.submissionStartedAt = now(); current.submissionLeaseUntil = new Date(Date.now() + 180000).toISOString(); });
+  const lease = renewSubmissionLease(id, owner);
+  try {
+    journal.offset = confirmedOffset(probe, journal.mediaBytes); await saveJournal(journal);
+    const result = await sendChunks(journal, path, io, async () => { lease.assert(); const state = await readState(); const current = findJob(state, id); if (state.paused || current.submissionOwner !== owner || current.status !== 'submitting') throw new Error('Upload ownership changed or publishing paused.'); });
+    await mutateState(state => { const current = findJob(state, id); if (current.submissionOwner !== owner) throw new Error('Upload ownership changed.'); current.providerPostId = result.id; move(current, 'queued', 'Existing resumable upload completed; verifying remote receipt.'); });
+    return reconcileYouTubeJob(id, io);
+  } catch { await failUnknown(id, undefined, owner); throw new Error('Upload continuation requires reconciliation; existing session preserved.'); } finally { lease.stop(); }
 }
 export async function uploadYouTubeJob(id: string, settingsInput: Settings, input: Transport = {}): Promise<Job> {
   const settings = youtubeSettingsSchema.parse(settingsInput);
   if (await loadJournal(id)) throw new Error('A durable YouTube upload journal already exists. Reconcile it; this command never starts a second upload.');
   const bundle = await exportJob(id);
   await verifyCurrent(await readState(), bundle.job);
-  const files = await Promise.all(bundle.variant.mediaPaths.filter(path => /\.mp4$/i.test(path)).map(resolveMediaLocation));
+  const resolvedFiles = await Promise.all(bundle.variant.mediaPaths.map(resolveMediaLocation));
+  const files = resolvedFiles.filter(path => /\.mp4$/i.test(path));
   if (files.length !== 1 || !files[0]) throw new Error('Attach exactly one reviewed MP4 to this YouTube variant.');
   const info = await stat(files[0]);
-  if (!info.isFile() || info.size <= 32 || info.size > 512 * 1024 * 1024) throw new Error('The stage-one uploader supports a non-empty MP4 up to 512 MiB.');
-  const video = await readFile(files[0]);
-  if (video.toString('ascii', 4, 8) !== 'ftyp') throw new Error('The approved media is not an MP4 container.');
-  const mediaHash = createHash('sha256').update(video).digest('hex');
-  const description = `${bundle.variant.text}\n\n${settings.descriptionDisclosure}\n\nSources:\n${bundle.draft.brief.sources.map(source => source.url).join('\n')}`;
+  if (!info.isFile() || info.size <= 32 || info.size > 8 * 1024 * 1024 * 1024) throw new Error('The stage-one uploader supports a non-empty MP4 up to 8 GiB.');
+  const mediaFile = files[0];
+  const handle = await open(mediaFile, 'r'); const header = Buffer.alloc(12);
+  try { await handle.read(header, 0, header.length, 0); } finally { await handle.close(); }
+  if (header.toString('ascii', 4, 8) !== 'ftyp') throw new Error('The approved media is not an MP4 container.');
+  const mediaHash = await hashMedia(mediaFile);
+  const description = `${bundle.variant.text}\n\n${settings.descriptionDisclosure}\n\nSources:\n${(bundle.draft?.brief.sources ?? bundle.job.snapshot?.video?.sources ?? []).map(source => source.url).join('\n')}`;
   if (!bundle.variant.title.trim() || [...bundle.variant.title].length > 100 || /[<>]/.test(bundle.variant.title) || /[<>]/.test(description) || Buffer.byteLength(description) > 5000 || bundle.variant.tags.join(',').length > 400) throw new Error('Reviewed YouTube metadata exceeds supported API limits; edit and approve the draft before uploading.');
   const io = await boundTransport(input);
   await verifyYouTubeChannel(io);
-  const journal: Journal = { version: 1, jobId: id, channelId: expectedYouTubeChannelId, approvedHash: bundle.job.approvedHash, mediaHash, mediaBytes: video.length, metadata: { snippet: { title: bundle.variant.title, description, tags: bundle.variant.tags, categoryId: settings.categoryId, defaultLanguage: settings.defaultLanguage }, status: { privacyStatus: settings.privacyStatus, selfDeclaredMadeForKids: settings.selfDeclaredMadeForKids, containsSyntheticMedia: settings.containsSyntheticMedia } }, phase: 'starting', sessionUrl: null, videoId: null, at: now() };
+  const journal: Journal = { version: 1, jobId: id, channelId: expectedYouTubeChannelId, approvedHash: bundle.job.approvedHash, mediaHash, mediaBytes: info.size, offset: 0, metadata: { snippet: { title: bundle.variant.title, description, tags: bundle.variant.tags, categoryId: settings.categoryId, defaultLanguage: settings.defaultLanguage }, status: { privacyStatus: settings.privacyStatus, selfDeclaredMadeForKids: settings.selfDeclaredMadeForKids, containsSyntheticMedia: settings.containsSyntheticMedia } }, phase: 'starting', sessionUrl: null, videoId: null, at: now() };
   const owner = `${hostname()}:${process.pid}:${randomUUID()}`;
   await mutateState(async state => {
     const job = findJob(state, id); if (!['scheduled', 'awaiting_operator'].includes(job.status)) throw new Error('This YouTube job is already submitted or cannot be uploaded.');
     await verifyCurrent(state, job);
-    if (createHash('sha256').update(await readFile(files[0] ?? '')).digest('hex') !== mediaHash) throw new Error('Video changed while preflight was running; review and approve again.');
-    job.status = 'submitting'; job.attempts++; job.submissionOwner = owner; job.submissionStartedAt = now(); job.error = null;
+    if (await hashMedia(mediaFile) !== mediaHash) throw new Error('Video changed while preflight was running; review and approve again.');
+    assertAccountAvailable(state, job);
+    job.status = 'submitting'; job.attempts++; job.submissionOwner = owner; job.submissionStartedAt = now(); job.submissionLeaseUntil = new Date(Date.now() + 180000).toISOString(); job.error = null;
     job.history.push({ at: now(), status: 'submitting', message: 'Official YouTube upload claimed; durable reconciliation is required after any unknown outcome.' });
   });
+  const lease = renewSubmissionLease(id, owner);
   try {
     await saveJournal(journal);
-    const started = await call('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', { method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Length': String(video.length), 'X-Upload-Content-Type': 'video/mp4' }, body: JSON.stringify(journal.metadata) }, io);
+    const started = await call('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', { method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Length': String(info.size), 'X-Upload-Content-Type': 'video/mp4' }, body: JSON.stringify(journal.metadata) }, io);
     if (!started.ok) throw new Error(`YouTube session request returned HTTP ${started.status}.`);
     const location = started.headers.get('Location'); if (!location) throw new Error('YouTube session response had no location.');
     journal.sessionUrl = validatedSession(location); journal.phase = 'session_ready'; await saveJournal(journal);
     await mutateState(async state => { const job = findJob(state, id); if (job.status !== 'submitting' || job.submissionOwner !== owner || !journalMatchesJob(job, journal)) throw new Error('YouTube submission ownership or snapshot changed before media upload.'); await verifyCurrent(state, job); job.submissionStartedAt = now(); });
     journal.phase = 'sending'; await saveJournal(journal);
-    const uploaded = await call(journal.sessionUrl, { method: 'PUT', headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(video.length), 'Content-Range': `bytes 0-${video.length - 1}/${video.length}` }, body: new Uint8Array(video).buffer }, io);
-    if (![200, 201].includes(uploaded.status)) throw new Error(`YouTube upload returned HTTP ${uploaded.status}.`);
-    const reply = await parsed(uploaded, z.object({ id: videoIdSchema })); journal.videoId = reply.id; journal.phase = 'uploaded'; await saveJournal(journal);
+    const reply = await sendChunks(journal, mediaFile, io, async () => { lease.assert(); const state = await readState(); const current = findJob(state, id); if (state.paused || current.status !== 'submitting' || current.submissionOwner !== owner) throw new Error('Submission ownership changed.'); });
     await mutateState(state => {
       const job = findJob(state, id);
       if (job.status !== 'submitting' || job.submissionOwner !== owner || !journalMatchesJob(job, journal)) throw new Error('YouTube submission ownership or snapshot changed after media upload; reconcile the saved video.');
@@ -132,7 +214,7 @@ export async function uploadYouTubeJob(id: string, settingsInput: Settings, inpu
     // Never issue another session POST, even when the first response was lost.
     await failUnknown(id, undefined, owner);
     throw new Error('YouTube upload did not finish with verified publication. The job is preserved for reconciliation; no automatic retry was performed.');
-  }
+  } finally { lease.stop(); }
 }
 export async function reconcileYouTubeJob(id: string, input: Transport = {}): Promise<Job> {
   const journal = await loadJournal(id); if (!journal) throw new Error('No saved YouTube upload journal exists for this job.');

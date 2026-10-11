@@ -1,3 +1,4 @@
+import { isTrustedDatabaseOrigin } from './database.ts';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises';
@@ -85,7 +86,7 @@ type Row = z.infer<typeof rowSchema>;
 function databaseConfig(): { url: string; key: string; id: string } {
   storageMode();
   const url = new URL(process.env.SUPABASE_URL ?? '');
-  if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) throw new Error('Supabase must use HTTPS.');
+  if (!isTrustedDatabaseOrigin(url)) throw new Error('Supabase must use HTTPS.');
   return { url: `${url.origin}/rest/v1/content_studio_workspaces`, key: process.env.SUPABASE_SECRET_KEY ?? '', id: z.uuid().parse(process.env.STUDIO_WORKSPACE_ID) };
 }
 async function databaseRequest(method: string, query: string, body?: unknown): Promise<Response> {

@@ -2,7 +2,20 @@
 
 更新日期：2026-10-10。第一阶段只在本机运行；云端继续保留在可行性和架构阶段。
 
-## 使用入口与运行方式
+## Current Docker entry point: 2026-10-11
+
+Open **http://127.0.0.1:14310** in the verified owner Chrome profile. All deployed services run in Docker. On an already configured private bind root, use:
+
+```sh
+sh scripts/docker.sh start --root /absolute/private-root
+sh scripts/docker.sh status --root /absolute/private-root
+```
+
+See [portable Docker setup, migration, backup and recovery](docker-runtime.md) and [Docker account authorization](accounts.md) before moving to another computer. The Web port can be configured during setup/restore. Automatic scheduling and publication have separate controls and remain paused after restore until explicitly enabled. LocalFS handles new media; CPU speech/rendering and Linux Codex execute in containers.
+
+**The native 4310, npm, launchd and private-Storage instructions and architecture tables below are historical recovery evidence. Do not use them to start the deployed application or a second instance.** A first-machine clean installer without captured Supabase configuration is not supported yet; the Docker reference describes the supported capture/transfer boundary.
+
+## Historical native runtime and acceptance
 
 在 Chrome 的 `radarxai@gmail.com` 配置文件打开 `http://127.0.0.1:4310`。项目目录为 `/Users/kwt/x/content-studio`。
 
@@ -110,3 +123,8 @@ npm run local:upgrade
 最新备份：`.studio/backups/2026-10-10T09-46-36.630Z`，包含 15 个 Storage 对象、109 个媒体文件、104 个稿件/运行文件和 2 份受限上传日志。隔离恢复演练使用此前一致性快照（76 个稿件/运行文件）；没有把新旧备份数量混为一次结果。最终 API/worker 已重新启动，数据库、pgmq、cron 健康，示例任务的定时执行仍停用，外部发布仍暂停。
 
 第二阶段继续沿用任务、运行、内容版本、素材和发布回执契约。需要实施的迁移包括多用户身份与 RLS、账户 OAuth 保管、托管 Postgres/Storage、常驻云 worker、模型 API、云端 TTS/渲染、部署与恢复演练。当前未部署云端生产服务。方案依据见 [本地优先建设复核](local-first-build-review.zh-CN.md) 和 [技术架构](web-technical-architecture.zh-CN.md)。
+
+
+## Subsequent portable Docker implementation
+
+The deployed target now uses Docker for all local services. See [Docker runtime delivery](docker-runtime.md) for current source contracts, actual ARM bilingual CPU render and fresh D0 recovery evidence, supported private backup transfer and remaining acceptance gates. Historical native runtime/model/publication evidence above is not Docker acceptance. Authenticated Linux Codex structured/image execution has passed in Docker. Final source verification passed 176 tests, strict TypeScript and a production build; live PostgreSQL cancellation/schema checks and Docker public-source fetching also passed. Docker/Chrome acceptance now includes source-backed article generation, merge-preserving synchronization, scoped refinement, scheduled discovery and upload restart recovery. Final rebuilt-image acceptance passed with all 13 services, a fresh standalone Sol-generated script and decoded/download-hash-verified video, the separate model catalog, read-only YouTube verification and the requested Chrome profile. The 48-hour burn-in is still pending.

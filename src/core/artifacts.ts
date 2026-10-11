@@ -1,3 +1,4 @@
+import { articleHtml, articleMarkdown } from './article-document.ts';
 import { link, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -49,10 +50,11 @@ export async function writeDraftArtifacts(draft: Draft): Promise<void> {
   const revision = join(root, `revision-${draft.revision}`);
   await mkdir(revision, { recursive: true, mode: 0o700 });
   const files: Record<string, string> = {
-    'master.md': `# ${draft.title}\n\n${draft.body}\n`,
+    'master.md': `# ${draft.title}\n\n${draft.document ? articleMarkdown(draft.document) : draft.body}\n`,
     'content.json': `${JSON.stringify(draft, null, 2)}\n`,
     'sources.md': draft.brief.sources.map(source => `## ${source.title}\n\n${source.url}\n\n${source.excerpt}\n`).join('\n'),
   };
+  if (draft.document) files['master.html'] = `<!doctype html><html><head><meta charset="utf-8"><title>Article export</title></head><body>${articleHtml(draft.document)}</body></html>\n`;
   for (const variant of draft.variants) files[`${variant.platform}.md`] = `# ${variant.title}\n\n${variant.text}\n\n${variant.tags.map(tag => tag.startsWith('#') ? tag : `#${tag}`).join(' ')}\n`;
   const lock = join(root, '.artifact-lock');
   const deadline = Date.now() + 15000;

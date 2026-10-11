@@ -1,26 +1,23 @@
 # Content Studio
 
-A local content workbench for one Mac and Codex. The Web UI manages reusable creation/discovery tasks, one-time/daily/weekly execution, sourced master drafts, platform adaptations, assets, independent video projects, and publication receipts.
+A portable local content workbench with sourced articles, independent video projects, durable operations and recoverable publication records. Supabase, API, role workers, Linux Codex, CPU TTS and renderer run in Docker Compose with private bind-mounted files. Cloud deployment remains a later phase.
 
-Cloud deployment remains a later phase. Local installation still needs network access for Codex models, public sources, and authorized platform APIs.
+## Run the Docker installation
 
-The latest requested upgrade is [local Docker with independent article/video pipelines](docs/docker-dual-pipeline-architecture.zh-CN.md): bind-mounted local files, separate workspaces/workers, and selectively reused upstream components. This is the target design and migration plan. The startup, storage and runtime descriptions below document the existing baseline; the new Docker/LocalFS/pg-boss/video stack has not yet been implemented or accepted.
-
-## Start locally
+See [Docker operation and acceptance](docs/docker-runtime.md). Existing installations can be captured once after a verified backup. Portable logical backups can then restore on another computer without host Node, Codex, Supabase CLI or macOS services. A clean installer without an existing private Supabase configuration is not yet provided.
 
 ```sh
-npm ci
-npm run local:setup
-npm run build
-npm run local:start
-npm run local:status
+sh scripts/docker.sh restore --source /absolute/private-backup --root /absolute/new-data-root
+sh scripts/docker.sh database --root /absolute/new-data-root
+sh scripts/docker.sh migrate --root /absolute/new-data-root
+sh scripts/docker.sh build --root /absolute/new-data-root
+sh scripts/docker.sh start --root /absolute/new-data-root
+sh scripts/docker.sh status --root /absolute/new-data-root
 ```
 
-Open **http://127.0.0.1:4310** in **Chrome profile `radarxai@gmail.com`**. Setup uses the existing Docker Desktop and Supabase CLI. First installation downloads the pinned Supabase images and can take considerable time. The local stack has its own project ID, ports, network and persistent volumes; no hosted Supabase project is required.
+The restored Web port defaults to **http://127.0.0.1:15310**; ports and UID/GID are configurable. Use Chrome profile `radarxai@gmail.com` for this owner's account acceptance. New computers authenticate their own Linux Codex container once. Process health and authenticated model readiness are distinct. Services continue independently of the browser while Docker runs.
 
-The API and a separate worker run under macOS `launchd`. Closing the browser or Codex chat does not stop a task. The Mac must be awake and Docker available; missed recurring schedules resume at the most recent eligible occurrence, without replaying an unlimited backlog. A once task with no date is manual-only. “Save and run” consumes a once task's scheduled occurrence.
-
-The application discovers the installed Codex model catalog and prefers the official desktop-bundled Codex executable. It uses existing local Codex sign-in. Authentication/model availability is confirmed by a real successful run, not just finding an executable.
+The former `npm run local:*` commands are legacy Mac migration/recovery tooling. Keep the old instance intact until isolated migration passes.
 
 ## Web workflow
 
@@ -30,7 +27,7 @@ The application discovers the installed Codex model catalog and prefers the offi
 4. Content generation saves the master checkpoint first, then each platform draft. Completed stages and local files remain available if a later stage fails. Retry continues the same run.
 5. Edit the master or an individual platform draft. A master edit schedules adaptation; independent platform fields are preserved and conflicts are shown. Web Codex refinement creates a reviewable proposal that can be accepted or rejected.
 6. Upload/reuse assets. Reference images are actually passed to Codex. Publishing attachments are selected separately.
-7. For a video, explicitly create a separate script, edit it, then explicitly render. The renderer uses selected images, readable text cards and macOS narration to produce an MP4. Choosing a video platform alone never renders a video.
+7. For a video, explicitly create a separate script, edit it, then explicitly render. The renderer uses reviewed footage, CPU Kokoro narration, MoneyPrinterTurbo stages and readable captions to produce an MP4. Choosing a video platform alone never renders a video.
 8. Select actual accounts and click **authorize and publish this revision**. Supported authorized APIs run in the worker; other destinations show a native portal, copy buttons, downloads and numbered instructions. Record the actual platform URL and ID after native publication.
 9. Continue failed/unfinished deliveries from their existing records. A remote outcome that is unknown is reconciled before any retry. Uploaded private/unlisted YouTube videos are distinguished from public publication.
 
@@ -50,7 +47,7 @@ Ignored `.studio/` holds runtime configuration, local content exports, cached/ge
 
 - `content/<draft-id>/master.md`, platform `.md` files, source material and immutable `revision-N/` snapshots.
 - `runs/<run-id>/master.md`, platform `.md` files and a structured run package, including partial completed work.
-- Local media and its private Storage copy, linked through stable asset IDs for new selections.
+- Immutable LocalFS media selected by stable asset IDs. Historical Storage objects remain readable during migration; alias resolution preserves historic paths and approval hashes.
 
 Never commit `.studio/`, credentials, raw Codex logs, cookies or browser profiles. The Web browser never receives the Supabase service-role key.
 
@@ -81,4 +78,4 @@ The database smoke test requires the running local stack and uses a disposable w
 - [Platform policies](docs/platform-policies-v2.zh-CN.md)
 - [Account setup and blockers](docs/accounts.md)
 
-Node.js 24+, Docker Desktop, Supabase CLI and authenticated Codex are required. Video rendering also needs FFmpeg/ffprobe, librsvg and macOS `say`. Cloud implementation, production Web OAuth, multi-user authorization and replacing the Mac/Codex adapters remain stage two.
+Docker/Compose and the private repository/config/data root are the deployed host requirements. Images include Node, Linux Codex, FFmpeg/ffprobe, librsvg, CPU TTS and renderer. Cloud implementation, production Web OAuth and multi-user authorization remain stage two.

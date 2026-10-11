@@ -1,0 +1,175 @@
+name: ${STUDIO_COMPOSE_PROJECT:-content-studio-docker}
+
+x-application: &application
+  image: ${STUDIO_APPLICATION_IMAGE:-content-studio:local}
+  build:
+    context: "${STUDIO_PROJECT_DIR:-..}"
+    dockerfile: infra/Dockerfile
+    target: application
+  user: "${STUDIO_UID:-1000}:${STUDIO_GID:-1000}"
+  init: true
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  read_only: true
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=256m"]
+  env_file: ["${STUDIO_DOCKER_ROOT:-../.docker}/config/application.env"]
+  environment:
+    NODE_ENV: production
+    STUDIO_CONTAINER: "true"
+    STUDIO_DATA_DIR: /data
+    STUDIO_LOCALFS_DIR: /data/media/localfs
+    STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://model-runner:8910,http://renderer:8900,http://tts:8880
+    STUDIO_MODEL_EXECUTOR_URL: http://model-runner:8910
+  depends_on:
+    postgres: {condition: service_healthy}
+    rest: {condition: service_started}
+    model-runner: {condition: service_healthy}
+
+services:
+  postgres:
+    extends: {file: "${STUDIO_DOCKER_ROOT:-../.docker}/config/supabase.compose.json", service: postgres}
+    restart: unless-stopped
+    volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/postgres:/var/lib/postgresql/data"]
+    ports: ["127.0.0.1:${STUDIO_DATABASE_PORT:-56422}:5432"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  rest:
+    extends: {file: "${STUDIO_DOCKER_ROOT:-../.docker}/config/supabase.compose.json", service: rest}
+    restart: unless-stopped
+    depends_on: {postgres: {condition: service_healthy}}
+  auth:
+    extends: {file: "${STUDIO_DOCKER_ROOT:-../.docker}/config/supabase.compose.json", service: auth}
+    restart: unless-stopped
+    depends_on: {postgres: {condition: service_healthy}}
+  storage:
+    extends: {file: "${STUDIO_DOCKER_ROOT:-../.docker}/config/supabase.compose.json", service: storage}
+    restart: unless-stopped
+    volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/storage:/mnt"]
+    depends_on: {postgres: {condition: service_healthy}}
+  mail:
+    extends: {file: "${STUDIO_DOCKER_ROOT:-../.docker}/config/supabase.compose.json", service: mail}
+    restart: unless-stopped
+  kong:
+    extends: {file: "${STUDIO_DOCKER_ROOT:-../.docker}/config/supabase.compose.json", service: kong}
+    restart: unless-stopped
+    ports: ["127.0.0.1:${STUDIO_SUPABASE_PORT:-56421}:8000"]
+    depends_on: [rest, auth, storage]
+  api:
+    <<: *application
+    ports: ["127.0.0.1:${STUDIO_WEB_PORT:-4410}:4310"]
+    environment:
+      NODE_ENV: production
+      STUDIO_CONTAINER: "true"
+      STUDIO_DATA_DIR: /data
+      STUDIO_LOCALFS_DIR: /data/media/localfs
+      STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://model-runner:8910,http://renderer:8900,http://tts:8880
+      STUDIO_MODEL_EXECUTOR_URL: http://model-runner:8910
+      STUDIO_TTS_URL: http://tts:8880
+      STUDIO_LISTEN_HOST: 0.0.0.0
+      PORT: "4310"
+      STUDIO_PUBLIC_ORIGIN: "http://127.0.0.1:${STUDIO_WEB_PORT:-4410}"
+    volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4310/healthz',{headers:{host:process.env.STUDIO_PUBLIC_ORIGIN.replace('http://','')}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  article-worker:
+    <<: *application
+    command: [node, --import, tsx, src/server/worker.ts]
+    environment:
+      STUDIO_WORKER_ROLE: article
+      STUDIO_CONTAINER: "true"
+      STUDIO_DATA_DIR: /data
+      STUDIO_LOCALFS_DIR: /data/media/localfs
+      STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://model-runner:8910,http://renderer:8900,http://tts:8880
+      STUDIO_MODEL_EXECUTOR_URL: http://model-runner:8910
+      STUDIO_TTS_URL: http://tts:8880
+    volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"]
+  video-worker:
+    <<: *application
+    command: [node, --import, tsx, src/server/worker.ts]
+    environment:
+      STUDIO_WORKER_ROLE: video
+      STUDIO_RENDERER_URL: http://renderer:8900
+      STUDIO_TTS_URL: http://tts:8880
+      STUDIO_TTS_FINGERPRINT: ee3111d6a2c903ed62f3b4fa19543c6901205ed39fce3c177e895b34a8386b9c:654434e7be9cf7c7a3a2f9dcd41e6f877fd417da3d73122b3fa5649355652734
+      STUDIO_CONTAINER: "true"
+      STUDIO_DATA_DIR: /data
+      STUDIO_LOCALFS_DIR: /data/media/localfs
+      STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://model-runner:8910,http://renderer:8900,http://tts:8880
+      STUDIO_MODEL_EXECUTOR_URL: http://model-runner:8910
+    volumes:
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/data/renderers:/data/renderers:ro"
+    depends_on:
+      postgres: {condition: service_healthy}
+      model-runner: {condition: service_healthy}
+      renderer: {condition: service_healthy}
+      tts: {condition: service_healthy}
+  delivery-worker:
+    <<: *application
+    command: [node, --import, tsx, src/server/worker.ts]
+    environment:
+      STUDIO_WORKER_ROLE: delivery
+      STUDIO_CONTAINER: "true"
+      STUDIO_DATA_DIR: /data
+      STUDIO_LOCALFS_DIR: /data/media/localfs
+      STUDIO_INTERNAL_ORIGINS: http://kong:8000
+    volumes:
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/youtube:/data/youtube"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/google:/data/google"
+
+  model-runner:
+    image: ${STUDIO_MODEL_IMAGE:-content-studio-model:local}
+    build: {context: "${STUDIO_PROJECT_DIR:-..}", dockerfile: infra/Dockerfile, target: model}
+    user: "${STUDIO_UID:-1000}:${STUDIO_GID:-1000}"
+    restart: unless-stopped
+    init: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=256m"]
+    environment: {CODEX_HOME: /auth, NODE_ENV: production}
+    volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/model-auth:/auth", "${STUDIO_DOCKER_ROOT:-../.docker}/model-cache:/home/node/.cache"]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8910/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  renderer:
+    image: ${STUDIO_RENDERER_IMAGE:-content-studio-renderer:d5}
+    build:
+      context: "${STUDIO_PROJECT_DIR:-..}"
+      dockerfile: services/renderer/Dockerfile
+      args: {STUDIO_UID: "${STUDIO_UID:-1000}", STUDIO_GID: "${STUDIO_GID:-1000}"}
+    user: "${STUDIO_UID:-1000}:${STUDIO_GID:-1000}"
+    restart: unless-stopped
+    init: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=256m"]
+    environment: {STUDIO_DATA_DIR: /data, STUDIO_RENDERER_PORT: "8900", PYTHONUNBUFFERED: "1"}
+    volumes:
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/data/videos:/data/videos:ro"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/data/renderers:/data/renderers"
+  tts:
+    image: ${STUDIO_TTS_IMAGE:-content-studio-tts:d5}
+    build:
+      context: "${STUDIO_PROJECT_DIR:-..}"
+      dockerfile: services/tts/Dockerfile
+      args: {STUDIO_UID: "${STUDIO_UID:-1000}", STUDIO_GID: "${STUDIO_GID:-1000}"}
+    user: "${STUDIO_UID:-1000}:${STUDIO_GID:-1000}"
+    restart: unless-stopped
+    init: true
+    environment: {USE_GPU: "false", DEVICE: cpu, STUDIO_TTS_CACHE_DIR: /tts-cache}
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/tts-cache:/tts-cache"]

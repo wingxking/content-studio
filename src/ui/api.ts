@@ -1,3 +1,5 @@
+import Uppy from '@uppy/core';
+import Tus from '@uppy/tus';
 import type { Platform } from '../core/model.ts';
 
 export type RunAction = (task: () => Promise<unknown>, message: string) => Promise<void>;
@@ -15,8 +17,15 @@ export const request = async <T,>(path: string, body?: unknown, method = 'POST')
   return data as T;
 };
 export const uploadAsset = async (file: File): Promise<{ path: string; asset: Asset }> => {
-  const response = await fetch('/api/assets', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name) }, body: file });
-  const data = await response.json() as { path?: string; asset?: Asset; error?: string };
-  if (!response.ok || !data.path || !data.asset) throw new Error(data.error ?? '素材上传失败');
-  return { path: data.path, asset: data.asset };
+  const uppy = new Uppy({ autoProceed: false, restrictions: { maxNumberOfFiles: 1, maxFileSize: 500 * 1024 * 1024 }, allowMultipleUploadBatches: false });
+  uppy.use(Tus, { endpoint: '/api/uploads', chunkSize: 8 * 1024 * 1024, retryDelays: [0, 1000, 3000, 5000], removeFingerprintOnSuccess: true });
+  try {
+    const id = uppy.addFile({ name: file.name, type: file.type, data: file, meta: { filename: file.name } });
+    const uploaded = await uppy.upload(); const success = uploaded?.successful?.find(item => item.id === id);
+    if (!success?.uploadURL) throw new Error(uploaded?.failed?.[0]?.error ?? 'Asset upload was interrupted. Select the same file to resume.');
+    const uploadId = new URL(success.uploadURL, location.origin).pathname.split('/').at(-1);
+    if (!uploadId) throw new Error('Upload receipt is missing.');
+    const result = await request<{ asset: Asset; reference: string }>(`uploads/${uploadId}/asset`);
+    return { path: result.reference, asset: result.asset };
+  } finally { uppy.destroy(); }
 };

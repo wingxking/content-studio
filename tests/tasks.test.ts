@@ -49,6 +49,14 @@ test('model catalog exposes only allowed public metadata', async () => {
   const file = join(directory, 'models_cache.json'); await writeFile(file, JSON.stringify({ secret: 'not-returned', models: [{ slug: 'model-test', display_name: 'Test model', description: 'Description', sensitive: 'not-returned' }] }));
   assert.deepEqual(await listModels(file), [{ id: 'model-test', name: 'Test model', description: 'Description' }]);
 });
+test('container application catalog preserves the native Codex cache', async () => {
+  process.env.STUDIO_CONTAINER = 'true'; process.env.CODEX_HOME = directory; delete process.env.STUDIO_MODEL_EXECUTOR_URL;
+  const native = JSON.stringify({ models: [{ slug: 'native-model', display_name: 'Native', description: 'Native cache', capabilities: { fixture: true } }], client_version: 'fixture' });
+  await writeFile(join(directory, 'models_cache.json'), native);
+  await writeFile(join(directory, 'studio-models.json'), JSON.stringify({ models: [{ slug: 'app-model', display_name: 'App', description: 'Public metadata' }] }));
+  assert.deepEqual(await listModels(), [{ id: 'app-model', name: 'App', description: 'Public metadata' }]);
+  assert.equal(await readFile(join(directory, 'models_cache.json'), 'utf8'), native);
+});
 async function fakeCodex(body: string): Promise<void> {
   const binary = join(directory, 'codex');
   await writeFile(binary, `#!${process.execPath}\n${body}\n`); await chmod(binary, 0o700); process.env.CODEX_BIN = binary;

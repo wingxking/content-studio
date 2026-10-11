@@ -1,4 +1,4 @@
-import { lookup } from 'node:dns/promises';
+import { lookup, Resolver } from 'node:dns/promises';
 import { request as requestHttp } from 'node:http';
 import { request as requestHttps } from 'node:https';
 import { isIP } from 'node:net';
@@ -27,20 +27,43 @@ export function validateSourceUrl(input: string): URL {
   if (host === 'localhost' || /\.(?:localhost|local|internal|lan|home)$/u.test(host) || (isIP(host) && !isPublicAddress(host))) throw new Error('Private and local source addresses are not allowed.');
   url.hash = ''; return url;
 }
-async function publicAddress(url: URL): Promise<{ address: string; family: number }> {
+const dohReply = z.object({ Status: z.number().int(), Question: z.array(z.object({ name: z.string(), type: z.number() })).optional(), Answer: z.array(z.object({ type: z.number(), data: z.string() })).default([]) });
+export function parseDohAddresses(input: unknown, host: string): { address: string; family: number }[] {
+  const reply = dohReply.parse(input); if (reply.Status !== 0 || reply.Question?.some(question => question.name.replace(/\.$/u, '').toLowerCase() !== host.toLowerCase())) throw new Error('Trusted DNS query failed or did not match the source hostname.');
+  const addresses = reply.Answer.filter(answer => [1, 28].includes(answer.type)).map(answer => ({ address: answer.data, family: answer.type === 1 ? 4 : 6 }));
+  if (!addresses.length || addresses.some(address => !isPublicAddress(address.address) || isIP(address.address) !== address.family)) throw new Error('Trusted DNS returned no safe public source address.');
+  return addresses;
+}
+async function trustedDoh(host: string, signal?: AbortSignal): Promise<{ address: string; family: number }[]> {
+  const origin = process.env.STUDIO_SOURCE_DOH_ORIGIN ?? 'https://cloudflare-dns.com';
+  if (!['https://cloudflare-dns.com', 'https://dns.google'].includes(origin)) throw new Error('Choose the configured Cloudflare or Google HTTPS source resolver.');
+  const url = new URL(origin === 'https://dns.google' ? '/resolve' : '/dns-query', origin); url.searchParams.set('name', host); url.searchParams.set('type', 'A');
+  const response = await fetch(url, { headers: { Accept: 'application/dns-json' }, signal: AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]), redirect: 'error' });
+  if (!response.ok || !response.body) throw new Error('Trusted HTTPS source DNS is unavailable. Check the configured resolver and Docker network.');
+  const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let bytes = 0;
+  try { for (;;) { const chunk = await reader.read(); if (chunk.done) break; bytes += chunk.value.byteLength; if (bytes > 65536) throw new Error('DNS response exceeded its limit.'); chunks.push(chunk.value); } } finally { await reader.cancel(); }
+  return parseDohAddresses(JSON.parse(Buffer.concat(chunks).toString()) as unknown, host);
+}
+async function publicAddress(url: URL, signal?: AbortSignal): Promise<{ address: string; family: number }> {
   const host = url.hostname.replace(/^\[|\]$/gu, '');
+  if (isIP(host)) return { address: host, family: isIP(host) };
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const addresses = await Promise.race([
-    lookup(host, { all: true, verbatim: true }),
+  const explicit = (process.env.STUDIO_SOURCE_DNS_SERVERS ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  if (explicit.some(address => !isPublicAddress(address))) throw new Error('Configure source DNS with trusted public resolver IP addresses.');
+  const resolver = new Resolver({ timeout: 2000, tries: 2 }); if (explicit.length) resolver.setServers(explicit);
+  const resolved = explicit.length ? Promise.allSettled([resolver.resolve4(host), resolver.resolve6(host)]).then(results => results.flatMap((result, index) => result.status === 'fulfilled' ? result.value.map(address => ({ address, family: index === 0 ? 4 : 6 })) : [])) : lookup(host, { all: true, verbatim: true });
+  let addresses = await Promise.race([
+    resolved,
     new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Source DNS lookup timed out.')), 5000); }),
-  ]).finally(() => { if (timer) clearTimeout(timer); });
-  if (!addresses.length || addresses.some(entry => !isPublicAddress(entry.address))) throw new Error('Source DNS resolved to a private or unsupported address.');
+  ]).catch(() => []).finally(() => { if (timer) clearTimeout(timer); });
+  if (!addresses.length || addresses.some(entry => !isPublicAddress(entry.address))) addresses = await trustedDoh(host, signal);
+  if (!addresses.length || addresses.some(entry => !isPublicAddress(entry.address))) throw new Error('Source DNS resolved to a private or unsupported address. A proxy may return synthetic IPs; configure STUDIO_SOURCE_DNS_SERVERS with a reachable trusted public resolver. The SSRF guard remains enforced.');
   const first = addresses.find(entry => entry.family === 4) ?? addresses[0]; if (!first) throw new Error('Source DNS had no address.');
   return first;
 }
 type PageReply = { status: number; location: string | null; mime: string; body: string };
 async function requestPage(url: URL, signal?: AbortSignal): Promise<PageReply> {
-  signal?.throwIfAborted(); const address = await publicAddress(url); signal?.throwIfAborted();
+  signal?.throwIfAborted(); const address = await publicAddress(url, signal); signal?.throwIfAborted();
   const host = url.hostname.replace(/^\[|\]$/gu, '');
   return new Promise<PageReply>((resolvePage, reject) => {
     const request = (url.protocol === 'https:' ? requestHttps : requestHttp)({

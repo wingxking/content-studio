@@ -12,24 +12,20 @@ const generationEnvelopeSchema = z.strictObject({
     status: z.enum(['allowed', 'excluded', 'uncertain']),
     reasons: z.array(z.string().trim().min(1).max(500)).min(1).max(12),
   }),
-  content: generatedSchema.nullable(),
+  content: generatedSchema.omit({ document: true }).nullable(),
 });
 
-const bundledBinary = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex';
 export async function codexExecutable(): Promise<string> {
   if (process.env.CODEX_BIN) {
     const binary = resolve(process.env.CODEX_BIN);
     await access(binary, constants.X_OK).catch(() => { throw new Error('CODEX_BIN must point to an executable Codex CLI binary.'); });
     return binary;
   }
-  try { await access(bundledBinary, constants.X_OK); return bundledBinary; }
-  catch {
     for (const directory of (process.env.PATH ?? '').split(':')) {
       const candidate = join(directory, 'codex');
       try { await access(candidate, constants.X_OK); return candidate; }
       catch { continue; }
     }
-  }
   throw new Error('Codex CLI is unavailable. Install Codex or set CODEX_BIN to the real executable, then sign in locally.');
 }
 function childEnvironment(): NodeJS.ProcessEnv {
@@ -64,6 +60,14 @@ async function runCodex(binary: string, directory: string, schemaPath: string, r
 export async function generateContent(input: Brief): Promise<Generated> {
   const brief = briefSchema.parse(input);
   if (new Set(brief.platforms).size !== brief.platforms.length) throw new Error('Requested platforms must be unique.');
+  if (process.env.STUDIO_MODEL_EXECUTOR_URL) {
+    const { runStructuredGeneration } = await import('./generation-engine.ts');
+    const envelope = await runStructuredGeneration(generationEnvelopeSchema, buildArticlePrompt(brief));
+    if (envelope.assessment.status !== 'allowed' || !envelope.content) throw new Error('Editorial assessment did not approve this topic.');
+    const targets = envelope.content.variants.map(item => item.platform);
+    if (JSON.stringify(targets) !== JSON.stringify(brief.platforms) || envelope.content.variants.some(item => item.mediaPaths.length)) throw new Error('Generated variants changed targets or invented media.');
+    return envelope.content;
+  }
   const binary = await codexExecutable();
   const directory = await mkdtemp(join(tmpdir(), 'content-studio-codex-'));
   try {

@@ -17,7 +17,7 @@ export function describeEditorialAssessment(assessment: z.infer<typeof assessmen
 
 export type GenerationProgress = { phase: string; message: string };
 export type GenerationOptions = {
-  model?: string; imagePaths?: string[]; signal?: AbortSignal; search?: boolean; timeoutMs?: number;
+  operationId?: string; outputSchema?: Record<string, unknown>; model?: string; imagePaths?: string[]; signal?: AbortSignal; search?: boolean; timeoutMs?: number;
   onProgress?: (event: GenerationProgress) => void | Promise<void>;
 };
 function childEnvironment(): NodeJS.ProcessEnv {
@@ -61,13 +61,17 @@ export function classifyCodexFailure(message: string): string | null {
 }
 export async function runStructuredGeneration<T>(schema: z.ZodType<T>, prompt: string, options: GenerationOptions = {}): Promise<T> {
   options.signal?.throwIfAborted();
+  if (process.env.STUDIO_MODEL_EXECUTOR_URL) {
+    const { executeRemoteModel } = await import('./model-executor.ts');
+    return executeRemoteModel(schema, prompt, options);
+  }
   if (options.model) await assertAvailableModel(options.model);
   const binary = await codexExecutable(); const directory = await mkdtemp(join(tmpdir(), 'content-studio-run-'));
   const timeout = options.timeoutMs ?? Number(process.env.CODEX_TIMEOUT_MS ?? 240000);
   if (!Number.isFinite(timeout) || timeout < 1000 || timeout > 600000) { await rm(directory, { recursive: true, force: true }); throw new Error('Generation timeout must be between 1 and 600 seconds.'); }
   try {
     const schemaPath = join(directory, 'schema.json'); const resultPath = join(directory, 'result.json');
-    await writeFile(schemaPath, JSON.stringify(codexOutputSchema(schema)), { mode: 0o600 });
+    await writeFile(schemaPath, JSON.stringify(options.outputSchema ?? codexOutputSchema(schema)), { mode: 0o600 });
     const images = await copyImages(options.imagePaths ?? [], directory);
     const args = ['-a', 'never', 'exec', '--ephemeral', '--ignore-user-config', '--sandbox', 'read-only', '--skip-git-repo-check', '--color', 'never', '--json', '--output-schema', schemaPath, '-o', resultPath,
       '-c', `web_search="${options.search ? 'live' : 'disabled'}"`, '-c', 'features.skip_host_skill_discovery=true'];

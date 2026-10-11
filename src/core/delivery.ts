@@ -2,7 +2,7 @@ import { basename } from 'node:path';
 import { z } from 'zod';
 import { mutateState, readState } from './store.ts';
 import { approveDraft, preparePublication, retryFailedPublication, reconcileJob, runDueJobs } from './pipeline.ts';
-import { createOperation, listOperations } from './editor.ts';
+import { createOperation, createVideoOperation, listOperations, listVideoOperations } from './editor.ts';
 import { reconcileYouTubeJob, uploadYouTubeJob, youtubeSettingsSchema, expectedYouTubeChannelId } from './youtube.ts';
 import { nativeUrls, type Job, type Account, type Draft } from './model.ts';
 import { hasYouTubeUploadJournal } from './publication-journal.ts';
@@ -87,6 +87,12 @@ export async function continuePublication(id: string): Promise<Job> {
     throw new Error('This failed job has a remote identity; verify the existing post before continuing.');
   }
   if (job.status === 'failed') job = await retryFailedPublication(id);
+  if (!job.draftId) {
+    if (job.subject?.kind !== 'video') throw new Error('Publication subject is missing.');
+    const previous = (await listVideoOperations(job.subject.id)).find(item => item.kind === 'publish' && item.input.jobId === id);
+    if (previous && !['queued', 'running'].includes(previous.status)) await createVideoOperation(job.subject.id, 'publish', { jobId: id, expectedRevision: job.subject.revision, ...(previous.input.youtubeSettings ? { youtubeSettings: previous.input.youtubeSettings } : {}) });
+    return job;
+  }
   const previous = (await listOperations(job.draftId)).find(item => item.kind === 'publish' && item.input.jobId === id);
   if (previous && ['queued', 'running'].includes(previous.status)) return job;
   if (previous || job.provider === 'postiz') await createOperation(job.draftId, 'publish', { jobId: id, ...(previous?.input.youtubeSettings ? { youtubeSettings: previous.input.youtubeSettings } : {}) });
@@ -98,7 +104,7 @@ export async function publicationHandoff(id: string) {
   const { variant, account, draft } = job.snapshot;
   const uploadJournalExists = await hasYouTubeUploadJournal(job);
   const requiresReconciliation = Boolean(job.providerPostId || job.remoteId || job.remoteUrl || uploadJournalExists || ['submitting', 'queued', 'needs_reconciliation', 'delivered', 'published'].includes(job.status));
-  const automatic = automaticFor(account, draft) && (await listOperations(job.draftId)).some(operation => operation.kind === 'publish' && operation.input.jobId === job.id);
+  const automatic = Boolean(draft && job.draftId && automaticFor(account, draft)) && (await listOperations(job.draftId ?? job.subject?.id ?? job.id)).some(operation => operation.kind === 'publish' && operation.input.jobId === job.id);
   const reason = account.status !== 'connected' ? '账号尚未完成自动发布连接，可在原生创作页面登录并发布。' : automatic ? '支持已授权的 API 发布；如当前任务受阻，可按下方步骤核对后继续。' : '此平台使用创作者原生发布流程；保留人工发布步骤以符合平台权限和自动化要求。';
   const files = variant.mediaPaths.map(path => ({ name: basename(path), url: `/api/media?path=${encodeURIComponent(path)}` }));
   return { requiresReconciliation, nativeUrl: nativeUrls[job.platform], title: variant.title, text: variant.text, tags: variant.tags, files, automatic, reason,

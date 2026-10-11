@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { modelExecutorOrigin } from './model-executor.ts';
 import { access, mkdir } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { codexExecutable } from './generator.ts';
@@ -16,12 +18,17 @@ export async function doctor(): Promise<Record<string, unknown>> {
     if (storage === 'supabase') localServices = await dbRpc('studio_runtime_health');
   } catch (error) { stateError = error instanceof Error ? error.message : 'Storage check failed.'; }
   const models = await listModels().catch(() => []);
-  return { stage: 1, requiredGoogleAccount: 'radarxai@gmail.com', codexAvailable, codexPath, modelCount: models.length,
-    codexAuthentication: '真实任务成功才确认模型认证可用。', storage, dataDirectory: dataDirectory(), stateReadable, localWritable, stateError, paused, connectedAccounts, localServices,
+  let modelRunner: unknown = null;
+  if (process.env.STUDIO_MODEL_EXECUTOR_URL) { try { const response = await fetch(`${modelExecutorOrigin()}/readyz`, { signal: AbortSignal.timeout(10000), redirect: 'error' }); modelRunner = await response.json() as unknown; codexAvailable = response.ok; codexPath = null; } catch { modelRunner = { ready: false, action: 'Start and authorize the isolated model-runner container.' }; } }
+  const roleOperations = storage === 'supabase' ? await dbRpc('studio_operation_diagnostics').catch(() => null) : null;
+  const scheduler = storage === 'supabase' ? await dbRpc('studio_scheduler_status').catch(() => null) : null;
+  const schedulerReady = z.object({ ready: z.boolean() }).safeParse(scheduler);
+  return { scheduler, schedulerReady: schedulerReady.success && schedulerReady.data.ready, stage: 1, requiredGoogleAccount: 'radarxai@gmail.com', codexAvailable, codexPath, modelCount: models.length,
+    modelRunner, roleOperations, runtime: process.env.STUDIO_CONTAINER === 'true' ? 'docker' : 'migration-native', codexAuthentication: 'Container login readiness and a real model task are separate checks.', storage: 'localfs', database: storage, dataDirectory: dataDirectory(), stateReadable, localWritable, stateError, paused, connectedAccounts, localServices,
     postizConfigured: Boolean(process.env.POSTIZ_API_KEY), automaticTextPlatforms: process.env.POSTIZ_API_KEY ? ['x (非热点)', 'linkedin'] : [],
     sourceDiscovery: '统一一次/每天/每周任务，研究真实来源，最多 20 个有来源的选题；不声称全球热度排名。',
     youtubePublishing: '授权的 YouTube API + 持久上传记录；先手动制作真实视频，再点击发布。',
     xPolicy: '热点相关的 X 内容交由账号所有者在原生页面发布。',
-    videoGeneration: '独立视频稿，手动生成解说和素材幻灯片，使用 FFmpeg 与 macOS 语音；图片可作为真实画面。',
+    videoGeneration: 'Independent versioned storyboard, CPU TTS, MPT renderer, measured captions and explicit render approval.',
     stageTwoGate: '本地验收通过后才开始云端实施。' };
 }

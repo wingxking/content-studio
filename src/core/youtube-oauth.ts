@@ -42,7 +42,7 @@ async function tokenRequest(parameters: URLSearchParams, fetcher: typeof fetch):
   try { return tokenReplySchema.parse(await response.json()); }
   catch { throw new Error('Google token response is invalid. Credentials were not logged.'); }
 }
-export async function authorizeDesktopYouTube(options: { clientFile: string; secretDirectory: string; onAuthorizationUrl: (url: string) => void | Promise<void>; fetcher?: typeof fetch; timeoutMs?: number }): Promise<{ authorized: true }> {
+export async function authorizeDesktopYouTube(options: { clientFile: string; secretDirectory: string; onAuthorizationUrl: (url: string) => void | Promise<void>; fetcher?: typeof fetch; timeoutMs?: number; callbackPort?: number; listenHost?: '127.0.0.1' | '0.0.0.0' }): Promise<{ authorized: true }> {
   let client: DesktopClient;
   try { client = clientSchema.parse(JSON.parse(await readFile(options.clientFile, 'utf8'))).installed; }
   catch { throw new Error('Provide a downloaded Google OAuth Desktop client JSON file.'); }
@@ -51,7 +51,7 @@ export async function authorizeDesktopYouTube(options: { clientFile: string; sec
   const challenge = createHash('sha256').update(verifier).digest('base64url');
   const state = randomBytes(32).toString('base64url');
   const server = createServer();
-  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(z.number().int().min(0).max(65535).parse(options.callbackPort ?? 0), z.enum(['127.0.0.1', '0.0.0.0']).parse(options.listenHost ?? '127.0.0.1'), () => { server.off('error', reject); resolve(); }); });
   const address = server.address();
   if (!address || typeof address === 'string') { server.close(); throw new Error('Could not start the OAuth loopback listener.'); }
   const redirectUri = `http://127.0.0.1:${address.port}/oauth2/callback`;
