@@ -55,6 +55,7 @@ export function DraftPanel({ draft, accounts, jobs, models, assets, onUpload, bu
     <details><summary>原始来源 · {draft.brief.sources.length} 个</summary><ul className="source-links">{draft.brief.sources.map(source => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a><p>{source.excerpt}</p></li>)}</ul></details>
     <div className="variant-tabs" role="group" aria-label="平台适配稿">{variants.map(item => <button className={platform === item.platform ? 'selected' : ''} key={item.platform} onClick={() => setPlatform(item.platform)}>{labels[item.platform]}</button>)}</div>
     {variant && <section className="platform-editor"><div className="section-label"><h3>{labels[platform]} 适配稿</h3><span>在这里微调，原稿更新时保留手改</span></div><label>平台标题<input value={variant.title} onChange={event => editVariant({ title: event.target.value })}/></label><label>平台正文<textarea rows={8} value={variant.text} onChange={event => editVariant({ text: event.target.value })}/></label><label>标签 · 逗号分隔<input value={variant.tags.join(', ')} onChange={event => editVariant({ tags: event.target.value.split(/[,，]/).map(tag => tag.trim()).filter(Boolean) })}/></label>
+      <NativeDraftFormatField variant={variant} disabled={busy || concurrent} onChange={editVariant}/>
       <div className="media-heading"><h3>发布素材</h3><label className="upload-button">+ 上传并附加<input type="file" accept=".mp4,.mov,.png,.jpg,.jpeg,.webp" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = ''; }}/></label>{!videoPlatforms.includes(platform) && <button disabled={busy || dirty || concurrent || !draft.approvedHash} onClick={() => void action(() => request(`drafts/${draft.id}/media`, { platform }), '配图卡片已生成，请审核素材并重新批准稿件。')}>手动生成图文卡片</button>}</div>
       {platform === 'producthunt' && <LaunchFields variant={variant} onChange={editVariant}/>}<div className="media-list">{variant.mediaPaths.map(path => <div key={path}>{/\.(mp4|mov)$/i.test(path) ? <video controls preload="metadata" src={`/api/media?path=${encodeURIComponent(path)}`}/> : /\.(png|jpg|jpeg|webp)$/i.test(path) ? <img alt={`${labels[platform]} 发布素材`} src={`/api/media?path=${encodeURIComponent(path)}`}/> : null}<a href={`/api/media?path=${encodeURIComponent(path)}`} target="_blank" rel="noreferrer">查看 / 下载素材 ↗</a><button className="text-button" onClick={() => editVariant({ mediaPaths: variant.mediaPaths.filter(asset => asset !== path) })}>移除</button></div>)}</div>
       <details><summary>从素材库附加到此平台</summary><AssetPicker assets={assets} selected={attachIds} onChange={setAttachIds} onUpload={onUpload} disabled={busy} imagesOnly={false} maxSelected={20}/><button disabled={busy || dirty || concurrent || !attachIds.length} onClick={() => void action(async () => { await request(`drafts/${draft.id}/assets`, { platform, assetIds: attachIds, expectedRevision: base.revision }); setAttachIds([]); }, '已将选中素材附到平台稿件，请审核。')}>附加所选素材</button><p className="hint">先保存文本编辑再附加，参考素材不会自动用于发布。</p></details>
@@ -69,6 +70,15 @@ export function DraftPanel({ draft, accounts, jobs, models, assets, onUpload, bu
     {draft.adaptationStatus === 'pending' && <p className="hint" role="status">原稿已更新，平台适配稿正在同步。同步失败时点击“更新平台适配稿”重试，完成后即可发布。</p>}
     <PublishPanel draft={draft} accounts={accounts} jobs={jobs} busy={busy} dirty={dirty || concurrent || draft.adaptationStatus === 'pending'} action={action}/>
   </article>;
+}
+
+export function NativeDraftFormatField({ variant, disabled, onChange }: { variant: Variant; disabled: boolean; onChange: (next: Partial<Variant>) => void }) {
+  if (!['wechat', 'zhihu', 'bilibili'].includes(variant.platform)) return null;
+  const supported = variant.format === 'article' || variant.platform === 'bilibili' && variant.format === 'video';
+  return <><label>内容格式<select aria-label="内容格式" value={variant.format ?? ''} disabled={disabled} onChange={event => {
+    const format = event.target.value;
+    if (format === 'article' || format === 'video' && variant.platform === 'bilibili') onChange({ format });
+  }}><option value="" disabled>请选择内容格式</option>{variant.format && !supported && <option value={variant.format} disabled>当前格式：{variant.format} · 请核对后选择</option>}<option value="article">文章 · 可保存到原生草稿箱</option>{variant.platform === 'bilibili' && <option value="video">视频 · 使用视频发布流程</option>}</select></label><p className="hint">原生草稿保存仅支持文章。选择格式后保存修改，再授权保存该版本的草稿；选择视频不会自动生成或渲染视频。</p></>;
 }
 
 function OperationCard({ operation, busy, applyBlocked, revision, action, onChange }: { operation: Operation; busy: boolean; applyBlocked: boolean; revision: number; action: RunAction; onChange: (operation: Operation) => void }) {

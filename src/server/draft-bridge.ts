@@ -1,0 +1,132 @@
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { pathToFileURL } from 'node:url';
+import { WebSocket, WebSocketServer, type RawData } from 'ws';
+import { z } from 'zod';
+import { readDraftBridgeConfig, type DraftBridgeConfig } from '../core/draft-bridge-config.ts';
+
+// These three reviewed upstream adapters only create drafts. No platform API is implemented here.
+export const draftBridgePlatforms = ['weixin', 'zhihu', 'bilibili'] as const;
+const platformSchema = z.enum(draftBridgePlatforms);
+const articleSchema = z.object({ title: z.string().trim().min(1).max(300), content: z.string().max(16 * 1024 * 1024).optional(), markdown: z.string().max(16 * 1024 * 1024).optional(), cover: z.string().max(8 * 1024 * 1024).optional() }).strict().refine(value => Boolean(value.content || value.markdown));
+const requestSchema = z.discriminatedUnion('method', [
+  z.object({ method: z.literal('listPlatforms'), params: z.object({ forceRefresh: z.boolean().optional() }).strict().optional() }).strict(),
+  z.object({ method: z.literal('checkAuth'), params: z.object({ platform: platformSchema }).strict() }).strict(),
+  z.object({ method: z.literal('uploadImage'), params: z.object({ platform: platformSchema, mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), imageData: z.string().min(4).max(14 * 1024 * 1024).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/) }).strict() }).strict(),
+  z.object({ method: z.literal('syncArticle'), params: z.object({ platforms: z.tuple([platformSchema]), article: articleSchema }).strict() }).strict(),
+]);
+type BridgeRequest = z.infer<typeof requestSchema>;
+type ErrorCode = 'NOT_CONFIGURED' | 'UNAUTHORIZED' | 'INVALID_REQUEST' | 'NOT_CONNECTED' | 'BUSY' | 'UNKNOWN_OUTCOME' | 'EXTENSION_REJECTED' | 'EXTENSION_RESPONSE_INVALID' | 'UNAVAILABLE';
+class BridgeError extends Error {
+  constructor(readonly code: ErrorCode, readonly status: number) { super(code); }
+}
+const maxBodyBytes = 24 * 1024 * 1024;
+const messages: Record<ErrorCode, string> = {
+  NOT_CONFIGURED: 'Configure the browser companion before connecting.', UNAUTHORIZED: 'Draft bridge authorization failed.', INVALID_REQUEST: 'The bridge request is invalid.', NOT_CONNECTED: 'The configured browser companion is not connected.', BUSY: 'A browser companion request is already running.', UNKNOWN_OUTCOME: 'The companion response was interrupted or timed out. Inspect the existing draft before retrying.', EXTENSION_REJECTED: 'The browser companion rejected the request. Verify its token and account login.', EXTENSION_RESPONSE_INVALID: 'The companion returned an invalid response. Inspect the existing draft before retrying.', UNAVAILABLE: 'The draft bridge is unavailable.',
+};
+type Session = { socket: WebSocket; configFingerprint: string; id: string };
+type Pending = { sessionId: string; method: BridgeRequest['method']; resolve: (value: unknown) => void; reject: (error: BridgeError) => void; timer: ReturnType<typeof setTimeout> };
+export type DraftBridgeOptions = { configPath?: string; host?: string; wsPort?: number; httpPort?: number; readTimeoutMs?: number; writeTimeoutMs?: number };
+
+function equalSecret(left: string, right: string): boolean {
+  const a = Buffer.from(left); const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+function fingerprint(config: DraftBridgeConfig): string { return createHash('sha256').update(JSON.stringify(config)).digest('hex'); }
+function json(response: ServerResponse, status: number, value: unknown): void {
+  response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); response.end(JSON.stringify(value));
+}
+async function body(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []; let length = 0;
+  for await (const chunk of request) { const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array); length += bytes.length; if (length > maxBodyBytes) throw new BridgeError('INVALID_REQUEST', 413); chunks.push(bytes); }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown; } catch { throw new BridgeError('INVALID_REQUEST', 400); }
+}
+function listen(server: Server, port: number, host: string): Promise<number> {
+  return new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, () => { server.off('error', reject); const address = server.address(); if (!address || typeof address === 'string') { reject(new Error('Draft bridge listener failed.')); return; } resolve(address.port); }); });
+}
+function stop(server: Server): Promise<void> { return new Promise(resolve => { server.close(() => resolve()); server.closeAllConnections(); }); }
+
+export function createDraftBridge(options: DraftBridgeOptions = {}): { start: () => Promise<{ wsPort: number; httpPort: number }>; close: () => Promise<void> } {
+  let session: Session | null = null;
+  let upgrading = false;
+  const pending = new Map<string, Pending>();
+  const failPending = (sessionId: string, code: ErrorCode) => { for (const [id, item] of pending) if (item.sessionId === sessionId) { clearTimeout(item.timer); pending.delete(id); item.reject(new BridgeError(code, 502)); } };
+  const clearSession = (value: Session) => { if (session?.id === value.id) session = null; failPending(value.id, 'UNKNOWN_OUTCOME'); };
+  const currentConfig = async (): Promise<DraftBridgeConfig> => {
+    const config = await readDraftBridgeConfig(options.configPath);
+    if (!config) throw new BridgeError('NOT_CONFIGURED', 503);
+    if (session && session.configFingerprint !== fingerprint(config)) { const old = session; clearSession(old); old.socket.terminate(); }
+    return config;
+  };
+  const dispatch = (request: BridgeRequest, config: DraftBridgeConfig): Promise<unknown> => {
+    const active = session;
+    if (!active || active.socket.readyState !== WebSocket.OPEN) throw new BridgeError('NOT_CONNECTED', 503);
+    if (pending.size) throw new BridgeError('BUSY', 409);
+    const id = randomUUID();
+    const write = request.method === 'syncArticle' || request.method === 'uploadImage';
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pending.delete(id); reject(new BridgeError(write ? 'UNKNOWN_OUTCOME' : 'UNAVAILABLE', 504)); }, write ? options.writeTimeoutMs ?? 12 * 60_000 : options.readTimeoutMs ?? 30_000);
+      pending.set(id, { sessionId: active.id, method: request.method, resolve, reject, timer });
+      active.socket.send(JSON.stringify({ id, method: request.method, token: config.extensionToken, params: request.params }), error => { if (error) { const item = pending.get(id); if (item) { clearTimeout(item.timer); pending.delete(id); item.reject(new BridgeError('UNKNOWN_OUTCOME', 502)); } } });
+    });
+  };
+  const httpServer = createServer((request, response) => {
+    void (async () => {
+      if (request.headers.origin !== undefined) throw new BridgeError('UNAUTHORIZED', 403);
+      // Process health intentionally does not expose configuration or browser connectivity.
+      if (request.method === 'GET' && request.url === '/healthz') { json(response, 200, { ok: true }); return; }
+      const config = await currentConfig();
+      if (!equalSecret(request.headers.authorization ?? '', `Bearer ${config.serviceKey}`)) throw new BridgeError('UNAUTHORIZED', 401);
+      if (request.method === 'GET' && request.url === '/status') { json(response, 200, { configured: true, connected: session?.socket.readyState === WebSocket.OPEN }); return; }
+      if (request.method !== 'POST' || request.url !== '/request' || request.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') throw new BridgeError('INVALID_REQUEST', 400);
+      const parsed = requestSchema.safeParse(await body(request));
+      if (!parsed.success) throw new BridgeError('INVALID_REQUEST', 400);
+      // Validate configuration again after reading the body so rotations cannot reuse an old session.
+      const latest = await currentConfig();
+      if (!equalSecret(request.headers.authorization ?? '', `Bearer ${latest.serviceKey}`)) throw new BridgeError('UNAUTHORIZED', 401);
+      const result = await dispatch(parsed.data, latest); json(response, 200, { result });
+    })().catch((error: unknown) => { const safe = error instanceof BridgeError ? error : new BridgeError('UNAVAILABLE', 503); json(response, safe.status, { error: { code: safe.code, message: messages[safe.code] } }); });
+  });
+  httpServer.requestTimeout = 15_000;
+  const wsServer = createServer((_request, response) => { response.writeHead(404); response.end(); });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024, perMessageDeflate: false });
+  wsServer.on('upgrade', (request, socket, head) => {
+    socket.on('error', () => socket.destroy());
+    const reject = (status: number) => { socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\n\r\n`); };
+    if (upgrading) { reject(409); return; }
+    upgrading = true;
+    void (async () => {
+      const config = await currentConfig();
+      const url = new URL(request.url ?? '', 'http://bridge.invalid');
+      if (request.headers.origin !== `chrome-extension://${config.extensionId}` || url.pathname !== '/connect' || url.searchParams.size !== 1 || !equalSecret(url.searchParams.get('key') ?? '', config.pairingKey)) { reject(403); return; }
+      if (session && session.socket.readyState !== WebSocket.CLOSED) { reject(409); return; }
+      wss.handleUpgrade(request, socket, head, client => {
+        const active: Session = { socket: client, id: randomUUID(), configFingerprint: fingerprint(config) }; session = active;
+        client.on('close', () => clearSession(active));
+        client.on('error', () => { clearSession(active); client.terminate(); });
+        client.on('message', (bytes: RawData, isBinary: boolean) => {
+          if (isBinary || session?.id !== active.id) { clearSession(active); client.terminate(); return; }
+          const parsed = (() => { try { return z.object({ id: z.string(), result: z.unknown().optional(), error: z.object({ code: z.number(), message: z.string() }).optional() }).strict().parse(JSON.parse(bytes.toString()) as unknown); } catch { return null; } })();
+          if (!parsed) { failPending(active.id, 'EXTENSION_RESPONSE_INVALID'); clearSession(active); client.terminate(); return; }
+          const item = pending.get(parsed.id);
+          if (!item || item.sessionId !== active.id) return;
+          clearTimeout(item.timer); pending.delete(parsed.id);
+          if (parsed.error) { item.reject(new BridgeError(parsed.error.code === 401 || parsed.error.code === 403 ? 'EXTENSION_REJECTED' : 'UNKNOWN_OUTCOME', 502)); return; }
+          if (!('result' in parsed)) { item.reject(new BridgeError('EXTENSION_RESPONSE_INVALID', 502)); return; }
+          item.resolve(parsed.result);
+        });
+      });
+    })().catch(() => reject(503)).finally(() => { upgrading = false; });
+  });
+  return {
+    async start() { const host = options.host ?? '0.0.0.0'; const wsPort = await listen(wsServer, options.wsPort ?? 9527, host); try { return { wsPort, httpPort: await listen(httpServer, options.httpPort ?? 8915, host) }; } catch (error) { await stop(wsServer); throw error; } },
+    async close() { if (session) { const old = session; clearSession(old); old.socket.terminate(); } for (const client of wss.clients) client.terminate(); await Promise.all([stop(httpServer), stop(wsServer)]); wss.close(); },
+  };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const bridge = createDraftBridge();
+  try { await bridge.start(); process.stdout.write('Draft bridge started.\n'); }
+  catch { process.stderr.write('Draft bridge could not start.\n'); process.exitCode = 1; }
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void bridge.close(); });
+}

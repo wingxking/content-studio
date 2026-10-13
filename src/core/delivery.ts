@@ -5,7 +5,7 @@ import { mutateState, readState } from './store.ts';
 import { approveDraft, preparePublication, retryFailedPublication, reconcileJob, runDueJobs } from './pipeline.ts';
 import { createOperation, createVideoOperation, listOperations, listVideoOperations } from './editor.ts';
 import { reconcileYouTubeJob, uploadYouTubeJob, youtubeSettingsSchema, expectedYouTubeChannelId } from './youtube.ts';
-import { type Job, type Account, type Draft } from './model.ts';
+import { platformIds, type Job, type Account, type Draft } from './model.ts';
 import { hasYouTubeUploadJournal } from './publication-journal.ts';
 
 function automaticFor(account: Account, draft: Draft): boolean {
@@ -15,7 +15,7 @@ function automaticFor(account: Account, draft: Draft): boolean {
   if (account.platform === 'x' && (draft.brief.topicOrigin === 'trend' || draft.brief.sources.some(source => new URL(source.url).hostname === 'trends.google.com'))) return false;
   return true;
 }
-export const publishInputSchema = z.object({ accountIds: z.array(z.uuid()).min(1).max(12), expectedRevision: z.number().int().positive(), youtubeSettings: youtubeSettingsSchema.optional() });
+export const publishInputSchema = z.object({ accountIds: z.array(z.uuid()).min(1).max(platformIds.length), expectedRevision: z.number().int().positive(), youtubeSettings: youtubeSettingsSchema.optional() });
 export async function publishDraft(id: string, value: z.infer<typeof publishInputSchema>): Promise<Job[]> {
   const input = publishInputSchema.parse(value); const state = await readState();
   const draft = state.drafts.find(item => item.id === id);
@@ -45,9 +45,10 @@ async function reconcileSavedYouTubeUpload(id: string): Promise<Job> {
   });
   return reconcileYouTubeJob(id);
 }
-async function executePublication(id: string, settings: unknown): Promise<Job> {
+async function executePublication(id: string, settings: unknown, signal?: AbortSignal): Promise<Job> {
   const state = await readState(); const job = state.jobs.find(item => item.id === id);
   if (!job) throw new Error('Publication not found.');
+  if (job.deliveryAction === 'save_draft') return (await import('./remote-drafts.ts')).executeRemoteDraft(id, signal);
   if (job.status === 'published') return job;
   if (job.platform === 'youtube' && job.provider === 'native') {
     if (await hasYouTubeUploadJournal(job)) return reconcileSavedYouTubeUpload(id);
@@ -59,8 +60,8 @@ async function executePublication(id: string, settings: unknown): Promise<Job> {
   if (job.provider === 'postiz') { if (state.paused) throw new Error('Publishing is paused. Resume the queue before continuing.'); await runDueJobs(); }
   const result = (await readState()).jobs.find(item => item.id === id); if (!result) throw new Error('Publication disappeared.'); return result;
 }
-export async function handlePublication(id: string, settings: unknown): Promise<Job> {
-  try { return await executePublication(id, settings); }
+export async function handlePublication(id: string, settings: unknown, signal?: AbortSignal): Promise<Job> {
+  try { return await executePublication(id, settings, signal); }
   catch (error) {
     await mutateState(state => {
       const job = state.jobs.find(item => item.id === id);
@@ -75,6 +76,7 @@ export async function handlePublication(id: string, settings: unknown): Promise<
 export async function continuePublication(id: string): Promise<Job> {
   const state = await readState(); let job = state.jobs.find(item => item.id === id);
   if (!job) throw new Error('Publication not found.');
+  if (job.deliveryAction === 'save_draft') return (await import('./remote-drafts.ts')).queueRemoteDraft(id);
   if (job.status === 'published') return job.platform === 'youtube' && job.provider === 'native' ? reconcileYouTubeJob(id) : job;
   if (await hasYouTubeUploadJournal(job)) return reconcileSavedYouTubeUpload(id);
   if (job.status === 'cancelled') return job;
@@ -103,10 +105,13 @@ export async function continuePublication(id: string): Promise<Job> {
 export async function publicationHandoff(id: string) {
   const state = await readState(); const job = state.jobs.find(item => item.id === id);
   if (!job?.snapshot) throw new Error('This legacy publication has no immutable handoff snapshot. Open its original account and verify the receipt.');
+  if (job.deliveryAction === 'save_draft') throw new Error('Use the draft task and draft receipt. Public publication requires a separate reviewed action.');
   const { variant, account, draft } = job.snapshot;
   const uploadJournalExists = await hasYouTubeUploadJournal(job);
   const requiresReconciliation = Boolean(job.providerPostId || job.remoteId || job.remoteUrl || uploadJournalExists || ['submitting', 'queued', 'needs_reconciliation', 'delivered', 'published'].includes(job.status));
-  const automatic = Boolean(draft && job.draftId && automaticFor(account, draft)) && (await listOperations(job.draftId ?? job.subject?.id ?? job.id)).some(operation => operation.kind === 'publish' && operation.input.jobId === job.id);
+  const automaticEligible = draft && job.draftId ? automaticFor(account, draft) : job.subject?.kind === 'video' && account.status === 'connected' && account.provider === 'native' && account.platform === 'youtube' && account.integrationId === expectedYouTubeChannelId;
+  const operations = automaticEligible ? job.draftId ? await listOperations(job.draftId) : job.subject?.kind === 'video' ? await listVideoOperations(job.subject.id) : [] : [];
+  const automatic = operations.some(operation => operation.kind === 'publish' && operation.input.jobId === job.id);
   const reason = account.status !== 'connected' ? '账号尚未完成自动发布连接，可在原生创作页面登录并发布。' : automatic ? '支持已授权的 API 发布；如当前任务受阻，可按下方步骤核对后继续。' : '此平台使用创作者原生发布流程；保留人工发布步骤以符合平台权限和自动化要求。';
   const files = variant.mediaPaths.map(path => ({ name: basename(path), url: `/api/media?path=${encodeURIComponent(path)}` }));
   const capability = publishingCapability(job.platform, job.subject?.kind === 'video' || variant.format === 'video' ? 'video' : 'article', account, { postizConfigured: Boolean(process.env.POSTIZ_API_KEY), expectedYoutubeChannel: expectedYouTubeChannelId });

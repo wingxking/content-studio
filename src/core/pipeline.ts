@@ -15,6 +15,7 @@ import { isManagedMediaPath, resolveMediaLocation } from './media-location.ts';
 import { writeDraftArtifacts } from './artifacts.ts';
 import { hasYouTubeUploadJournal } from './publication-journal.ts';
 import { assertAutomatedPublishingAllowed } from './publishing-policy.ts';
+import { sameDraftAccount } from './draft-connectors.ts';
 import { canonicalPostizContent, listRemotePosts, RejectedPublishError, submitPostiz, validatePostizVariant, verifyIntegration, type Integration } from './postiz.ts';
 
 const owner = `${hostname()}:${process.pid}:${randomUUID()}`;
@@ -144,6 +145,7 @@ export async function approveDraft(id: string, expectedRevision?: number): Promi
 }
 export async function addAccount(input: Omit<Account, 'id'>): Promise<Account> {
   const account = accountSchema.parse({ ...input, id: randomUUID() });
+  delete account.draftConnection;
   if (account.provider === 'postiz' && account.status === 'connected') { await verifyIntegration(account); account.verifiedAt = now(); }
   return mutateState(state => {
     if (state.accounts.some(existing => existing.provider === account.provider && existing.platform === account.platform && (account.provider === 'postiz' ? existing.integrationId === account.integrationId : existing.label === account.label))) throw new Error('This account already exists.');
@@ -169,8 +171,10 @@ export async function updateAccount(id: string, input: Omit<Account, 'id'>): Pro
   if (account.provider === 'postiz' && account.status === 'connected') { await verifyIntegration(account); account.verifiedAt = now(); }
   return mutateState(state => {
     const existing = findAccount(state, id);
-    if (!sameTarget(existing, account) && state.jobs.some(job => job.accountId === id && job.status === 'submitting')) throw new Error('Account target cannot change during an active provider submission.');
+    if (!sameTarget(existing, account) && state.jobs.some(job => job.accountId === id && ['submitting', 'needs_reconciliation'].includes(job.status))) throw new Error('Account target cannot change during an active or uncertain provider submission.');
     if (state.accounts.some(other => other.id !== id && other.provider === account.provider && other.platform === account.platform && (account.provider === 'postiz' ? other.integrationId === account.integrationId : other.label === account.label))) throw new Error('This account target already exists.');
+    delete account.draftConnection;
+    if (existing.platform !== account.platform || existing.provider !== account.provider || existing.integrationId !== account.integrationId) delete existing.draftConnection;
     Object.assign(existing, account); return existing;
   });
 }
@@ -216,15 +220,16 @@ async function dispatchDue(): Promise<Job[]> {
     for (const job of jobs) transition(job, 'needs_reconciliation', 'Worker stopped during submission. Check the provider before any resubmission.');
     return jobs;
   });
-  const ids = (await readState()).jobs.filter(job => job.status === 'scheduled' && Date.parse(job.scheduledAt) <= Date.now()).map(job => job.id);
+  const ids = (await readState()).jobs.filter(job => job.deliveryAction !== 'save_draft' && job.status === 'scheduled' && Date.parse(job.scheduledAt) <= Date.now()).map(job => job.id);
   const results: Job[] = [...recovered];
   for (const id of ids) {
     activeSubmissions.add(id);
     try {
       const claimed = await mutateState(async state => {
         const job = findJob(state, id);
-        if (state.paused || job.status !== 'scheduled' || job.subject?.kind === 'video') return null;
-        if (state.jobs.some(other => other.id !== id && other.accountId === job.accountId && ['submitting', 'needs_reconciliation'].includes(other.status))) return null;
+        if (state.paused || job.status !== 'scheduled' || job.subject?.kind === 'video' || job.deliveryAction === 'save_draft') return null;
+        const targetAccount = findAccount(state, job.accountId);
+        if (state.jobs.some(other => other.id !== id && sameDraftAccount(other, targetAccount) && ['submitting', 'needs_reconciliation'].includes(other.status))) return null;
         const draft = findDraft(state, requireArticleId(job)); const account = findAccount(state, job.accountId); const variant = variantFor(draft, job.platform);
         try {
           if (account.status !== 'connected') throw new Error('Target account is no longer connected.');
@@ -329,6 +334,7 @@ export function validateReceipt(platform: Platform, remoteUrl: string, remoteId:
 export async function confirmPublication(jobId: string, remoteUrl: string, remoteId: string): Promise<Job> {
   return mutateState(state => {
     const job = findJob(state, jobId);
+    if (job.deliveryAction === 'save_draft') throw new Error('Use a draft receipt for this task. Public publication requires a separate reviewed action.');
     if (!['awaiting_operator', 'needs_reconciliation', 'queued', 'failed', 'delivered'].includes(job.status)) throw new Error('Only a submitted or native handoff job can receive a publication receipt.');
     job.remoteUrl = validateReceipt(job.platform, remoteUrl, remoteId); job.remoteId = remoteId.trim();
     transition(job, 'published', 'Operator supplied the platform post identifier and URL.'); return job;
@@ -345,6 +351,7 @@ export async function cancelJob(id: string): Promise<Job> {
 }
 export async function reconcileJob(id: string): Promise<Job> {
   const state = await readState(); const job = findJob(state, id); const draft = job.snapshot?.draft ?? findDraft(state, requireArticleId(job)); const account = job.snapshot?.account ?? findAccount(state, job.accountId); const variant = job.snapshot?.variant ?? variantFor(draft, job.platform);
+  if (job.deliveryAction === 'save_draft') throw new Error('Inspect the remote draft box and record a draft receipt. This task cannot be reconciled as a public post.');
   if (job.provider !== 'postiz' || !(['queued', 'needs_reconciliation'].includes(job.status) || (job.status === 'failed' && job.providerPostId))) throw new Error('This job needs a native publication receipt or is not ready for Postiz reconciliation.');
   if (!job.providerPostId && job.approvedHash !== targetHash(draft, variant, account)) throw new Error('Content or target changed after the unknown submission. Inspect the provider and record its exact publication receipt.');
   const posts = await listRemotePosts(job);

@@ -39,6 +39,44 @@ test('Reddit publishing requires an approved integration, explicit single-commun
   value.reddit = { ...target(), rulesReviewedAt: new Date(Date.now() + 3600000).toISOString() }; assert.throws(() => validateRedditTarget(value), /seven days/);
   assert.equal(accountSchema.safeParse({ ...value, reddit: { ...target(), flair: null } }).success, false);
 });
+test('native article drafts require a bound connected account and the matching connected bridge without enabling publication', () => {
+  const extensionId = 'a'.repeat(32);
+  const config = { draftBridgeConnected: true, draftBridgeExtensionId: extensionId };
+  for (const platform of ['wechat', 'zhihu', 'bilibili'] as const) {
+    const value = { ...account(platform), draftConnection: { adapter: 'wechatsync' as const, userId: 'verified-author', extensionId, checkedAt: new Date().toISOString(), permissionConfirmed: true as const } };
+    const ready = publishingCapability(platform, 'article', value, config);
+    assert.equal(ready.draftRoute, 'wechatsync');
+    assert.equal(ready.remoteDraft, true);
+    assert.equal(ready.providerDraft, false);
+    assert.equal(ready.automatic, false);
+    assert.equal(ready.stage, 'manual');
+    for (const unavailable of [
+      publishingCapability(platform, 'article', value),
+      publishingCapability(platform, 'article', value, { ...config, draftBridgeConnected: false }),
+      publishingCapability(platform, 'article', value, { ...config, draftBridgeExtensionId: null }),
+      publishingCapability(platform, 'article', value, { ...config, draftBridgeExtensionId: 'b'.repeat(32) }),
+      publishingCapability(platform, 'article', account(platform), config),
+      publishingCapability(platform, 'article', { ...value, status: 'needs_login' }, config),
+      publishingCapability(platform, 'article', { ...value, status: 'blocked' }, config),
+      publishingCapability(platform, 'article', { ...value, provider: 'postiz' }, config),
+      publishingCapability(platform, 'article', { ...value, platform: 'xiaohongshu' }, config),
+      publishingCapability(platform, 'video', value, config),
+    ]) assert.equal(unavailable.remoteDraft, false);
+  }
+  assert.equal(publishingCapability('xiaohongshu', 'article', account('xiaohongshu'), config).draftRoute, 'none');
+});
+test('Postiz review drafts are provider drafts and never platform-native drafts', () => {
+  for (const platform of ['x', 'linkedin', 'reddit'] as const) {
+    const value = { ...account(platform, 'postiz'), ...(platform === 'reddit' ? { reddit: target() } : {}) };
+    const ready = publishingCapability(platform, 'article', value, { postizConfigured: true });
+    assert.equal(ready.draftRoute, 'postiz');
+    assert.equal(ready.providerDraft, true);
+    assert.equal(ready.remoteDraft, false);
+    assert.equal(publishingCapability(platform, 'article', value).providerDraft, false);
+    assert.equal(publishingCapability(platform, 'article', { ...value, status: 'blocked' }, { postizConfigured: true }).providerDraft, false);
+    assert.equal(publishingCapability(platform, 'article', { ...value, verifiedAt: null }, { postizConfigured: true }).providerDraft, false);
+  }
+});
 test('Reddit Postiz self-post contract includes title, destination and flair and is not resubmitted', async () => {
   let posts = 0; let payload: unknown;
   process.env.POSTIZ_API_KEY = 'fixture-key';

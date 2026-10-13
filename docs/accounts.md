@@ -4,6 +4,35 @@ Required identity: **Chrome profile `radarxai@gmail.com`** for Google sign-in, S
 
 Observed on 2026-10-10: Chrome displayed `coding (radarxai@gmail.com)` and an authenticated Supabase dashboard. The existing `radar` organization displayed **EXCEEDING USAGE LIMITS** and “Grace period is over”, while its project showed Healthy. This is point-in-time UI evidence; it does not establish capacity for a new project. No existing radar database was modified for Content Studio.
 
+## Draft companion account baseline: 2026-10-13
+
+The visible Chrome profile was verified as `radarxai@gmail.com`; the inspected extensions inventory did not contain WechatSync. The new gateway and draft adapters therefore remain unpaired and have no real-platform draft acceptance. This observation does not establish a new login or permission grant for any platform. Earlier account observations below keep their original dates.
+
+For WeChat Official Accounts, Zhihu and Bilibili articles, install the reviewed extension in that profile and inspect its requested permissions. Enable the extension's CLI / MCP connection, then enter its extension ID and Token only in the local Content Studio Accounts setup. Copy the private connection URL directly into the extension; do not put it in CLI arguments, shell history, screenshots, chat or tracked files. Keep the browser open. Refresh connection status, log into each intended platform, verify its visible identity and creator permissions, then bind that exact account in Content Studio. WeChat portal access remains subject to the documented tool restriction; the account owner must use a permitted environment. Do not route a denied browser operation through the companion.
+
+X, LinkedIn and Reddit drafts use an independently configured Postiz integration. The last recorded provider check on 2026-10-12 found no `POSTIZ_API_KEY`; do not treat historical browser login as a configured provider. Supply API credentials through the private runtime configuration and verify the actual integration and account. Reddit still requires a specific target community and current rules. These drafts stay in Postiz, not the platforms' native draft boxes; public delivery has separate approval and policy checks. Configure bridge secrets through the Accounts UI, never CLI arguments.
+
+### Draft-only CLI in Docker
+
+The CLI follows the existing positional syntax. Run it inside the API container; the host needs Docker Compose and a shell, not Node. Replace the example IDs and revision with the exact reviewed article, selected accounts and current revision. `save-drafts` explicitly authorizes storing that version as drafts and queues delivery; its return value is not proof of an existing remote draft. It works while public publishing is paused, and does not request public publication.
+
+```sh
+STUDIO_BIND_ROOT=/absolute/private-root
+
+docker compose --project-directory "$PWD" --env-file "$STUDIO_BIND_ROOT/config/compose.env" -f infra/compose.yml \
+  exec -T api node --import tsx src/server/cli.ts draft-connectors
+
+docker compose --project-directory "$PWD" --env-file "$STUDIO_BIND_ROOT/config/compose.env" -f infra/compose.yml \
+  exec -T api node --import tsx src/server/cli.ts save-drafts DRAFT_UUID ACCOUNT_UUID_1,ACCOUNT_UUID_2 3
+
+docker compose --project-directory "$PWD" --env-file "$STUDIO_BIND_ROOT/config/compose.env" -f infra/compose.yml \
+  exec -T api node --import tsx src/server/cli.ts draft-receipt JOB_UUID REMOTE_DRAFT_ID 'https://zhuanlan.zhihu.com/p/REMOTE_DRAFT_ID/edit'
+```
+
+`draft-connectors` returns the sanitized configured/connected state, nonsecret extension ID, observed account identities and ecosystem catalog. It does not print the extension Token, service key or pairing URL. `draft-receipt` records an owner's verification of an existing draft after opening it in the intended account; it neither creates another draft nor records a published post. Unknown outcomes must be inspected before recording the existing ID and URL; do not repeatedly queue them.
+
+Never paste a token-bearing WeChat editor URL into a shell. Use only the identifier and a reconstructed token-free URL such as `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=REMOTE_DRAFT_ID`. Bilibili uses `https://member.bilibili.com/platform/upload/text/edit?aid=REMOTE_DRAFT_ID`. For Postiz, use the configured Postiz web origin without query parameters or fragments and the actual provider draft ID. Core receipt validation strips or rejects unsafe URL parameters, but cannot remove secrets already stored in shell history. No command accepts pairing credentials as arguments.
+
 ## Current Docker account setup: 2026-10-11
 
 The deployed runtime uses the supported [Docker lifecycle](docker-runtime.md); the native npm/CLI instructions below are historical migration evidence. All account and credential operations run in containers. Keep Chrome profile `radarxai@gmail.com` verified before this owner's Google actions. Browser login and API authorization remain separate.

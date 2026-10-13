@@ -48,22 +48,31 @@ export function validatePostizVariant(account: Account, variant: Variant): void 
   if (account.platform === 'x') assertXText(content);
   if (account.platform === 'linkedin' && content.length > 3000) throw new Error('LinkedIn text and tags exceed 3000 characters.');
 }
-export async function submitPostiz(job: Job, account: Account, variant: Variant, integration: Integration): Promise<string> {
+async function createPostizPost(job: Job, account: Account, variant: Variant, integration: Integration, type: 'now' | 'draft'): Promise<string> {
+  if (integration.id !== account.integrationId || integration.disabled || !matchesPlatform(integration, account) || variant.platform !== account.platform) throw new Error('Postiz integration and content must match the selected platform account.');
   validatePostizVariant(account, variant);
   const settings = account.platform === 'reddit' && account.reddit ? { __type: 'reddit', subreddit: [{ value: { subreddit: account.reddit.subreddit, title: variant.title, type: 'self', url: '', is_flair_required: account.reddit.flairRequired, flair: account.reddit.flair } }] } : account.platform === 'x' ? { __type: 'x', who_can_reply_post: 'everyone' } : { __type: integration.identifier };
-  const body = { type: 'now', date: job.submissionStartedAt ?? new Date().toISOString(), shortLink: false, tags: [], posts: [{ integration: { id: account.integrationId }, value: [{ content: canonicalPostizContent(variant), image: [] }], settings }] };
+  const body = { type, date: job.submissionStartedAt ?? new Date().toISOString(), shortLink: false, tags: [], posts: [{ integration: { id: account.integrationId }, value: [{ content: canonicalPostizContent(variant), image: [] }], settings }] };
+  const action = type === 'draft' ? 'draft creation' : 'submission';
   let response: Response;
   try { response = await request('/posts', 'POST', body); }
-  catch { throw new UncertainPublishError('Postiz submission did not return a response. Reconcile it before creating another job.'); }
+  catch { throw new UncertainPublishError(`Postiz ${action} did not return a response. Reconcile it before creating another job.`); }
   if (!response.ok) {
     if (response.status >= 400 && response.status < 500 && response.status !== 408) throw new RejectedPublishError(`Postiz rejected this request (HTTP ${response.status}).`);
-    throw new UncertainPublishError(`Postiz returned HTTP ${response.status}; the publish outcome is unknown. Reconcile before resubmitting.`);
+    throw new UncertainPublishError(`Postiz returned HTTP ${response.status}; the ${action} outcome is unknown. Reconcile before resubmitting.`);
   }
   try {
     const receipts = z.array(z.object({ postId: z.string().min(1), integration: z.string() })).parse(await response.json());
     if (receipts.length !== 1 || receipts[0]?.integration !== account.integrationId) throw new Error('Unexpected receipt');
     return receipts[0].postId;
   } catch { throw new UncertainPublishError('Postiz accepted the request but returned an invalid receipt. Reconcile before resubmitting.'); }
+}
+export async function submitPostiz(job: Job, account: Account, variant: Variant, integration: Integration): Promise<string> {
+  return createPostizPost(job, account, variant, integration, 'now');
+}
+export async function savePostizDraft(job: Job, account: Account, variant: Variant, integration: Integration): Promise<string> {
+  // The receipt identifies a Postiz draft, not a native platform draft or a published post.
+  return createPostizPost(job, account, variant, integration, 'draft');
 }
 export async function listRemotePosts(job: Job): Promise<RemotePost[]> {
   const day = 86400000;

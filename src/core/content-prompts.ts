@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { briefSchema, generatedSchema, platformLabels, platformSchema, sourceSchema, type Brief, type Platform } from './model.ts';
+import { briefSchema, generatedSchema, platformIds, platformLabels, platformSchema, sourceSchema, type Brief, type Platform } from './model.ts';
 
 export const CONTENT_GUIDANCE_VERSION = '2026-10-12';
 
@@ -20,7 +20,7 @@ export const platformEditorialGuidance: Record<Platform, string> = {
   facebook: 'Add substantive original explanation or analysis suited to the intended community; match captions to the actual content. Minor caption, border or speed edits do not make a repost substantially original. Avoid unrelated long captions, excessive hashtags, repeated spam copies, fake engagement and engagement bait. Use licensed/original assets and check current synthetic-media and commercial disclosure requirements.',
 };
 
-const uniquePlatformsSchema = z.array(platformSchema).min(1).max(12).refine(values => new Set(values).size === values.length, 'Requested platforms must be unique.');
+const uniquePlatformsSchema = z.array(platformSchema).min(1).max(platformIds.length).refine(values => new Set(values).size === values.length, 'Requested platforms must be unique.');
 export const discoveryPromptInputSchema = z.object({
   platforms: uniquePlatformsSchema,
   audience: z.string().min(1).max(1000),

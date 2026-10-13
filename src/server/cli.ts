@@ -13,6 +13,8 @@ import { discoverTrends, discoveryCountrySchema } from '../core/discovery.ts';
 import { saveDiscoverySnapshot } from '../core/discoverySnapshot.ts';
 import { addAccount, approveDraft, cancelJob, confirmPublication, createDraft, exportJob, pausePublishing, reconcileJob, recordMetrics, replaceDraft, runDueJobs, scheduleJob, updateAccount, verifyDraftApproval } from '../core/pipeline.ts';
 import { buildMedia } from '../core/media.ts';
+import { draftConnectorStatus } from '../core/draft-connectors.ts';
+import { confirmDraftReceipt, saveDraftsInputSchema, saveRemoteDrafts } from '../core/remote-drafts.ts';
 
 await loadRuntimeEnvironment();
 
@@ -49,6 +51,9 @@ try {
     case 'youtube-reconcile': result = await reconcileYouTubeJob(required(first, 'job ID')); break;
     case 'doctor': result = await doctor(); break;
     case 'status': result = await readState(); break;
+    case 'draft-connectors': result = await draftConnectorStatus(); break;
+    case 'save-drafts': result = await saveRemoteDrafts(z.uuid().parse(required(first, 'draft ID')), saveDraftsInputSchema.parse({ accountIds: required(second, 'comma-separated account IDs').split(','), expectedRevision: Number(required(third, 'reviewed revision')) })); break;
+    case 'draft-receipt': result = await confirmDraftReceipt(z.uuid().parse(required(first, 'job ID')), required(second, 'remote draft ID'), required(third, 'token-free draft editor URL')); break;
     case 'generate': {
       const brief = briefSchema.parse(await loadJson(required(first, 'brief JSON file')));
       result = await createDraft(brief, await generateContent(brief)); break;
@@ -86,7 +91,7 @@ try {
       await writeFile(resolve(folder, 'post.md'), `# ${bundle.variant.title}\n\n${bundle.variant.text}\n\n${bundle.variant.tags.map(tag => `#${tag}`).join(' ')}\n\nOpen: ${bundle.nativeUrl}\n\nMedia:\n${bundle.variant.mediaPaths.join('\n')}\n`);
       result = { folder, status: bundle.job.status, nextAction: 'Use Chrome profile radarxai@gmail.com and record the verified platform ID and URL.' }; break;
     }
-    default: result = { usage: ['prompt <article|discovery|refinement|video> <input.json>', 'discover [US,IN,GB,ZA] [4|24|48|168]', 'youtube-auth <desktop-client.json>', 'youtube-channel', 'youtube-upload <job-id> <settings.json>', 'youtube-reconcile <job-id>', 'doctor', 'status', 'generate <brief.json>', 'import <content.json>', 'approve <draft-id>', 'account <account.json>', 'media <draft-id> <platform>', 'schedule <schedule.json>', 'run', 'pause', 'resume', 'export <job-id> <folder>', 'receipt <job-id> <url> <remote-id>', 'reconcile <job-id>', 'metrics <job-id> <metrics.json>', 'cancel <job-id>'] };
+    default: result = { usage: ['prompt <article|discovery|refinement|video> <input.json>', 'discover [US,IN,GB,ZA] [4|24|48|168]', 'youtube-auth <desktop-client.json>', 'youtube-channel', 'youtube-upload <job-id> <settings.json>', 'youtube-reconcile <job-id>', 'doctor', 'status', 'draft-connectors', 'save-drafts <draft-id> <account-id,...> <reviewed-revision>', 'draft-receipt <job-id> <remote-draft-id> <token-free-editor-url>', 'generate <brief.json>', 'import <content.json>', 'approve <draft-id>', 'account <account.json>', 'media <draft-id> <platform>', 'schedule <schedule.json>', 'run', 'pause', 'resume', 'export <job-id> <folder>', 'receipt <job-id> <url> <remote-id>', 'reconcile <job-id>', 'metrics <job-id> <metrics.json>', 'cancel <job-id>'] };
   }
   process.stdout.write(command === 'prompt' && typeof result === 'string' ? `${result}\n` : `${JSON.stringify(result, null, 2)}\n`);
 } catch (error) {

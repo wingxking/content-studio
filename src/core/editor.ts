@@ -233,6 +233,17 @@ export async function handleStudioOperation(id: string, parentSignal: AbortSigna
       else throw new Error('Unsupported video operation.');
       await patch({ status: 'succeeded', phase: 'Completed', output, error: null, lease_until: null }); return;
     }
+    if (operation.kind === 'publish') {
+      const jobId = z.uuid().parse(operation.input.jobId);
+      const job = (await readState()).jobs.find(item => item.id === jobId);
+      if (job?.deliveryAction === 'save_draft') {
+        const { handlePublication } = await import('./delivery.ts');
+        await patch({ phase: 'Saving selected remote draft' });
+        const saved = await handlePublication(jobId, undefined, signal);
+        await patch({ status: saved.status === 'draft_saved' ? 'succeeded' : 'failed', phase: saved.status === 'draft_saved' ? 'Draft saved' : 'Needs attention', output: { job: saved }, error: saved.error, lease_until: null });
+        return;
+      }
+    }
     const draft = await currentDraft(operation.draftId); const expected = z.number().parse(operation.input.expectedRevision);
     const savedSync = z.object({ proposal: generatedSchema, baselines: z.array(variantSchema), conflicts: z.array(z.string()), applying: z.literal(true) }).safeParse(operation.output);
     const committedSync = operation.kind === 'sync' && savedSync.success ? await committedSyncRevision(draft, expected, id) : null;

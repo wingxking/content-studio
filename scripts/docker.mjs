@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
-import { chmod, chown, cp, mkdir, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, chown, cp, lstat, mkdir, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -67,6 +67,15 @@ async function copyBackupTrees(sourceRoot, destination) {
     await copyTree(join(sourceRoot,name),join(destination,name),name==='model-auth'?new Set(['tmp']):new Set());
   }
 }
+export async function prepareDraftBridgeDirectory(bindRoot, uid, gid) {
+  if (![uid, gid].every(value => Number.isInteger(value) && value >= 0)) throw new Error('Invalid Docker host UID/GID.');
+  for (const name of ['delivery-private', 'delivery-private/draft-bridge']) {
+    const path = join(bindRoot, name);
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    if (!(await lstat(path)).isDirectory()) throw new Error('Private bridge directory must not be a symbolic link.');
+    await chown(path, uid, gid); await chmod(path, 0o700);
+  }
+}
 async function writeBackupDestination(destination, writer) {
   await mkdir(dirname(destination),{recursive:true,mode:0o700});
   await mkdir(destination,{mode:0o700});
@@ -96,7 +105,9 @@ async function capture() {
   const runtime = Object.fromEntries((await readFile(join(dataSource, 'runtime.env'), 'utf8')).split('\n').filter(Boolean).map(line => { const i = line.indexOf('='); return [line.slice(0, i), JSON.parse(line.slice(i + 1))]; }));
   const webPort = Number(flag('--port') ?? '14310');
   if (!Number.isInteger(webPort) || webPort < 1024 || webPort > 65535) throw new Error('Invalid local application port.');
-  for (const folder of ['config', 'postgres', 'storage', 'data', 'data/videos', 'data/renderers', 'tts-cache', 'model-auth', 'model-cache', 'delivery-private/youtube', 'delivery-private/google']) await mkdir(join(root, folder), { recursive: true, mode: 0o700 });
+  const draftBridgePort = Number(flag('--draft-bridge-port') ?? '19527');
+  if (!Number.isInteger(draftBridgePort) || draftBridgePort < 1024 || draftBridgePort > 65535) throw new Error('Invalid local draft companion port.');
+  for (const folder of ['config', 'postgres', 'storage', 'data', 'data/videos', 'data/renderers', 'tts-cache', 'model-auth', 'model-cache', 'delivery-private/youtube', 'delivery-private/google', 'delivery-private/draft-bridge']) await mkdir(join(root, folder), { recursive: true, mode: 0o700 });
   const mappings = Object.entries(serviceNames).map(([service, name]) => [`supabase_${name}_${suffix}`, service]);
   const services = {};
   for (const [service, short] of Object.entries(serviceNames)) {
@@ -125,7 +136,7 @@ async function capture() {
   const relocation = join(root, 'data', 'relocation.json');
   if (!await stat(relocation).then(() => true).catch(() => false)) await privateFile(relocation, JSON.stringify({ originalDataRoot: dataSource }));
   await privateFile(join(config, 'application.env'), envText({ SUPABASE_URL: 'http://kong:8000', SUPABASE_SECRET_KEY: runtime.SUPABASE_SECRET_KEY, STUDIO_WORKSPACE_ID: runtime.STUDIO_WORKSPACE_ID, STUDIO_LOCAL_RUNTIME: 'true' }));
-  await privateFile(join(config, 'compose.env'), envText({ STUDIO_DOCKER_ROOT: root, STUDIO_COMPOSE_PROJECT: flag('--project') ?? `content-studio-docker-${randomUUID().slice(0, 8)}`, STUDIO_UID: process.env.STUDIO_HOST_UID ?? process.getuid?.() ?? 1000, STUDIO_GID: process.env.STUDIO_HOST_GID ?? process.getgid?.() ?? 1000, STUDIO_WEB_PORT: webPort, STUDIO_SUPABASE_PORT: Number(flag('--supabase-port') ?? 56421), STUDIO_DATABASE_PORT: Number(flag('--database-port') ?? 56422) }));
+  await privateFile(join(config, 'compose.env'), envText({ STUDIO_DOCKER_ROOT: root, STUDIO_COMPOSE_PROJECT: flag('--project') ?? `content-studio-docker-${randomUUID().slice(0, 8)}`, STUDIO_UID: process.env.STUDIO_HOST_UID ?? process.getuid?.() ?? 1000, STUDIO_GID: process.env.STUDIO_HOST_GID ?? process.getgid?.() ?? 1000, STUDIO_WEB_PORT: webPort, STUDIO_SUPABASE_PORT: Number(flag('--supabase-port') ?? 56421), STUDIO_DATABASE_PORT: Number(flag('--database-port') ?? 56422), STUDIO_DRAFT_BRIDGE_PORT: draftBridgePort }));
   const uid = Number(process.env.STUDIO_HOST_UID ?? process.getuid?.() ?? 1000); const gid = Number(process.env.STUDIO_HOST_GID ?? process.getgid?.() ?? 1000);
   async function ownership(path) { await chown(path, uid, gid); if ((await stat(path)).isDirectory()) for (const name of await readdir(path)) await ownership(join(path, name)); }
   for (const name of ['data','config','model-auth','model-cache','delivery-private','tts-cache']) await ownership(join(root,name));
@@ -212,7 +223,7 @@ async function backup() {
   const keyPath=resolve(flag('--key-file')??join(root,'backup.key'));
   if(keyPath===destination || keyPath.startsWith(`${destination}${sep}`)) throw new Error('Encryption key must stay outside the backup folder.');
   if (await stat(destination).then(() => true).catch(() => false)) throw new Error('Backup destination already exists.');
-  await compose(['stop', 'api', 'article-worker', 'video-worker', 'delivery-worker']); await pause();
+  await compose(['stop', 'api', 'article-worker', 'video-worker', 'delivery-worker', 'draft-bridge']); await pause();
   await writeBackupDestination(destination,async()=>{
   await compose(['exec', '-T', 'postgres', 'pg_dump', '-U', 'postgres', '-d', 'postgres', '--format=custom'], { output: join(destination, 'database.dump') });
   await sql("select coalesce(string_agg(pg_get_functiondef(p.oid)||E';\\n'||format('alter function %s owner to %I;',p.oid::regprocedure,pg_get_userbyid(p.proowner)),E'\\n'),'') from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='graphql_public';",join(destination,'graphql-functions.sql'));
@@ -226,6 +237,8 @@ async function backup() {
 }
 async function restore() {
   const source = flag('--source'); if (!source) throw new Error('Restore requires --source backup-folder and --root new-bind-root.');
+  const draftBridgePort = Number(flag('--draft-bridge-port') ?? '19528');
+  if (!Number.isInteger(draftBridgePort) || draftBridgePort < 1024 || draftBridgePort > 65535) throw new Error('Invalid local draft companion port.');
   if (await readdir(root).then(entries => entries.length > 0).catch(() => false)) throw new Error('Restore requires an empty bind root.');
   const folder = resolve(source); const manifest = JSON.parse(await readFile(join(folder, 'manifest.json'), 'utf8'));
   if (manifest.format !== 3 || manifest.encryption !== 'aes-256-gcm' || !manifest.paused) throw new Error('Unsupported or unpaused backup.');
@@ -240,13 +253,14 @@ async function restore() {
     if(file.key.endsWith('.enc')) await decryptFile(join(folder,file.key),destination,key,name);
     else { await mkdir(dirname(destination),{recursive:true,mode:0o700}); await cp(join(folder,file.key),destination,{errorOnExist:true,force:false}); }
   }
-  for (const name of ['postgres','model-auth','model-cache','delivery-private/youtube/uploads','delivery-private/google','tts-cache']) await mkdir(join(root,name),{recursive:true,mode:0o700});
+  for (const name of ['postgres','model-auth','model-cache','delivery-private/youtube/uploads','delivery-private/google','delivery-private/draft-bridge','tts-cache']) await mkdir(join(root,name),{recursive:true,mode:0o700});
   if(!args.includes('--restore-private')) for(const id of manifest.journalIds??[]) {
     if(!/^[a-f0-9-]{36}$/.test(id)) throw new Error('Invalid protected upload journal ID.');
     await privateFile(join(root,'delivery-private/youtube/uploads',`${id}.json`),JSON.stringify({jobId:id,restoredJournalMarker:true}));
   }
   await seedJournalMarkers(join(root,'data/publication-journals'),manifest.journalIds??[]);
   const env = await settings(); env.STUDIO_DOCKER_ROOT = root; env.STUDIO_COMPOSE_PROJECT = flag('--project') ?? `content-studio-restore-${randomUUID().slice(0, 8)}`; env.STUDIO_UID = process.env.STUDIO_HOST_UID ?? process.getuid?.() ?? 1000; env.STUDIO_GID = process.env.STUDIO_HOST_GID ?? process.getgid?.() ?? 1000; env.STUDIO_WEB_PORT = Number(flag('--port') ?? 15310); env.STUDIO_SUPABASE_PORT = Number(flag('--supabase-port') ?? 57421); env.STUDIO_DATABASE_PORT = Number(flag('--database-port') ?? 57422);
+  env.STUDIO_DRAFT_BRIDGE_PORT = draftBridgePort;
   await writeFile(join(config, 'compose.env'), envText(env), { mode: 0o600 });
   async function ownership(path) { await chown(path, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); if ((await stat(path)).isDirectory()) for (const name of await readdir(path)) await ownership(join(path,name)); }
   for (const name of ['data','config','model-auth','model-cache','delivery-private','tts-cache']) await ownership(join(root,name));
@@ -289,7 +303,7 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   }
   else if (action === 'database') { await compose(['up', '-d', '--wait', 'postgres', 'rest', 'auth', 'storage', 'mail', 'kong']); await pause(); console.log('Supabase Docker services started with publishing and scheduling paused.'); }
   else if (action === 'migrate') await migrate();
-  else if (action === 'start') { await compose(['up', '-d', '--wait']); console.log('All Docker services started.'); }
+  else if (action === 'start') { const env = await settings(); await prepareDraftBridgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await compose(['up', '-d', '--wait']); console.log('All Docker services started.'); }
   else if (action === 'stop') { await compose(['stop']); console.log('Docker services stopped; bind data retained.'); }
   else if (action === 'status') console.log(await compose(['ps', '--format', 'json']));
   else if (action === 'backup') await backup();

@@ -66,13 +66,17 @@ services:
       STUDIO_CONTAINER: "true"
       STUDIO_DATA_DIR: /data
       STUDIO_LOCALFS_DIR: /data/media/localfs
-      STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://model-runner:8910,http://renderer:8900,http://tts:8880
+      STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://model-runner:8910,http://renderer:8900,http://tts:8880,http://draft-bridge:8915
       STUDIO_MODEL_EXECUTOR_URL: http://model-runner:8910
       STUDIO_TTS_URL: http://tts:8880
+      STUDIO_DRAFT_BRIDGE_URL: http://draft-bridge:8915
+      STUDIO_DRAFT_BRIDGE_PORT: "${STUDIO_DRAFT_BRIDGE_PORT:-19527}"
       STUDIO_LISTEN_HOST: 0.0.0.0
       PORT: "4310"
       STUDIO_PUBLIC_ORIGIN: "http://127.0.0.1:${STUDIO_WEB_PORT:-4410}"
-    volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"]
+    volumes:
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/draft-bridge:/data/draft-bridge"
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:4310/healthz',{headers:{host:process.env.STUDIO_PUBLIC_ORIGIN.replace('http://','')}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
@@ -119,11 +123,35 @@ services:
       STUDIO_CONTAINER: "true"
       STUDIO_DATA_DIR: /data
       STUDIO_LOCALFS_DIR: /data/media/localfs
-      STUDIO_INTERNAL_ORIGINS: http://kong:8000
+      STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://draft-bridge:8915
+      STUDIO_DRAFT_BRIDGE_URL: http://draft-bridge:8915
     volumes:
       - "${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"
       - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/youtube:/data/youtube"
       - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/google:/data/google"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/draft-bridge:/data/draft-bridge:ro"
+
+  draft-bridge:
+    image: ${STUDIO_APPLICATION_IMAGE:-content-studio:local}
+    command: [node, --import, tsx, src/server/draft-bridge.ts]
+    user: "${STUDIO_UID:-1000}:${STUDIO_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    environment:
+      NODE_ENV: production
+      STUDIO_CONTAINER: "true"
+      STUDIO_DRAFT_BRIDGE_CONFIG: /data/draft-bridge/config.json
+    ports: ["127.0.0.1:${STUDIO_DRAFT_BRIDGE_PORT:-19527}:9527"]
+    volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/draft-bridge:/data/draft-bridge:ro"]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8915/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   model-runner:
     image: ${STUDIO_MODEL_IMAGE:-content-studio-model:local}

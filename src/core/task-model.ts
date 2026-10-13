@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { platformSchema, sourceSchema, variantSchema } from './model.ts';
+import { platformIds, platformSchema, sourceSchema, variantSchema } from './model.ts';
 
 export const taskSourceSchema = z.object({
   title: z.string().max(300).default(''),
@@ -23,7 +23,7 @@ export const taskInputSchema = z.object({
   audience: z.string().trim().max(1000).default(''),
   angle: z.string().trim().max(4000).default(''),
   model: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u),
-  platforms: z.array(platformSchema).min(1).max(12).refine(values => new Set(values).size === values.length, 'Platforms must be unique'),
+  platforms: z.array(platformSchema).min(1).max(platformIds.length).refine(values => new Set(values).size === values.length, 'Platforms must be unique'),
   sources: z.array(taskSourceSchema).max(20).default([]),
   assetIds: z.array(z.uuid()).max(12).default([]),
   kind: z.enum(['content', 'discovery']),
@@ -39,7 +39,7 @@ export type Task = z.infer<typeof taskSchema>;
 export const assessmentSchema = z.object({ status: z.enum(['allowed', 'excluded', 'uncertain']), reasons: z.array(z.string().min(1).max(500)).min(1).max(20) });
 export const hotQuestionSchema = z.object({
   question: z.string().min(3).max(1000), audienceNeed: z.string().min(1).max(2000), angle: z.string().min(1).max(4000),
-  sourceUrls: z.array(z.url()).min(1).max(20), platforms: z.array(platformSchema).min(1).max(12),
+  sourceUrls: z.array(z.url()).min(1).max(20), platforms: z.array(platformSchema).min(1).max(platformIds.length),
   assessment: z.object({ status: z.literal('allowed'), reasons: z.array(z.string().min(1)).min(1).max(20) }),
 });
 export type HotQuestion = z.infer<typeof hotQuestionSchema>;
@@ -51,7 +51,7 @@ export const taskRunSchema = z.object({
   id: z.uuid(), taskId: z.uuid(), slot: z.string(), taskSnapshot: taskSchema,
   status: z.enum(taskRunStatuses), phase: z.string(), progress: z.number().min(0).max(100), attempt: z.number().int().nonnegative(),
   error: z.string().nullable(), warnings: z.array(z.string()).default([]), questions: z.array(hotQuestionSchema).max(20), sources: z.array(sourceSchema).max(20),
-  master: masterSchema.nullable(), variants: z.array(variantSchema).max(12), draftId: z.uuid().nullable(), outputPaths: outputPathsSchema.nullable(),
+  master: masterSchema.nullable(), variants: z.array(variantSchema).max(platformIds.length), draftId: z.uuid().nullable(), outputPaths: outputPathsSchema.nullable(),
   startedAt: z.iso.datetime().nullable(), finishedAt: z.iso.datetime().nullable(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
 });
 export type TaskRun = z.infer<typeof taskRunSchema>;

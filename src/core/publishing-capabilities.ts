@@ -3,10 +3,16 @@ import { nativeUrls, platformIds } from './model.ts';
 
 export const priorityPlatforms = ['reddit', 'producthunt', 'wechat', 'zhihu', 'xiaohongshu', 'bilibili'] as const;
 export type ContentKind = 'article' | 'video';
+export type PublishingCapabilityConfig = {
+  postizConfigured?: boolean;
+  expectedYoutubeChannel?: string;
+  draftBridgeConnected?: boolean;
+  draftBridgeExtensionId?: string | null;
+};
 export type PublishingCapability = {
   platform: Platform; accountId: string | null; kind: ContentKind;
   route: 'postiz_api' | 'youtube_api' | 'native';
-  automatic: boolean; remoteDraft: boolean; canVerify: boolean;
+  automatic: boolean; remoteDraft: boolean; providerDraft: boolean; draftRoute: 'none' | 'wechatsync' | 'postiz'; canVerify: boolean;
   stage: 'needs_account' | 'needs_login' | 'blocked' | 'manual' | 'ready' | 'unsupported';
   format: string; nativeUrl: string; blockers: string[]; steps: string[]; sources: string[];
   verification: 'operator_record' | 'provider_check' | 'not_checked';
@@ -30,9 +36,9 @@ export function validateRedditTarget(account: Account, currentTime = Date.now())
   if (target.flairRequired && !target.flair) throw new Error('This subreddit requires a flair template.');
 }
 
-export function publishingCapability(platform: Platform, kind: ContentKind, account?: Account, config: { postizConfigured?: boolean; expectedYoutubeChannel?: string } = {}): PublishingCapability {
+export function publishingCapability(platform: Platform, kind: ContentKind, account?: Account, config: PublishingCapabilityConfig = {}): PublishingCapability {
   const capability: PublishingCapability = {
-    platform, accountId: account?.id ?? null, kind, route: 'native', automatic: false, remoteDraft: false, canVerify: true,
+    platform, accountId: account?.id ?? null, kind, route: 'native', automatic: false, remoteDraft: false, providerDraft: false, draftRoute: 'none', canVerify: true,
     stage: account ? 'manual' : 'needs_account', format: kind === 'video' ? '独立视频' : formats[platform] ?? '平台文字稿',
     nativeUrl: platform === 'bilibili' && kind === 'article' ? 'https://member.bilibili.com/platform/upload/text' : nativeUrls[platform],
     blockers: [], verification: account?.verifiedAt ? 'operator_record' : 'not_checked',
@@ -44,10 +50,21 @@ export function publishingCapability(platform: Platform, kind: ContentKind, acco
     capability.stage = 'unsupported'; capability.canVerify = false; capability.blockers.push('当前独立视频流水线未接入此目标。'); return capability;
   }
   if (platform === 'producthunt') capability.blockers.push('仅产品上线资料；需要真实产品网址和个人账号 onboarding。默认 API 只读；本项目没有创建产品的写入适配器。');
-  if (platform === 'wechat') capability.blockers.push('官方发布权限须逐账号检查；个人及部分未认证账号无法使用群发接口。当前采用原生草稿与人工发布。');
+  if (platform === 'wechat') capability.blockers.push('官方发布权限须逐账号检查；个人及部分未认证账号无法使用群发接口。可连接受支持的扩展保存文章草稿，公开发布仍在平台人工完成。');
   if (platform === 'zhihu') capability.blockers.push('当前提供专栏稿件与原生编辑器；未安装或未验证扩展时，不宣称已同步远端草稿。');
   if (platform === 'xiaohongshu') capability.blockers.push('核对账号类别、内容资格及 AI 标识；本项目没有获准的自动发布连接。');
   if (platform === 'bilibili') capability.blockers.push('专栏文章与视频入口不同；自动投稿需官方应用审核及账号授权。');
+  if (kind === 'article' && ['wechat', 'zhihu', 'bilibili'].includes(platform) && (!account || account.provider === 'native')) {
+    capability.draftRoute = 'wechatsync';
+    const connection = account?.draftConnection;
+    const bound = connection?.adapter === 'wechatsync' && connection.permissionConfirmed === true && Boolean(connection.userId.trim());
+    const matchingExtension = Boolean(config.draftBridgeExtensionId) && connection?.extensionId === config.draftBridgeExtensionId;
+    capability.remoteDraft = account?.platform === platform && account.status === 'connected' && bound && matchingExtension && config.draftBridgeConnected === true;
+    if (!bound) capability.blockers.push('在“平台与账号”绑定扩展实际身份，并明确允许保存审核后的文章草稿。');
+    else if (!matchingExtension) capability.blockers.push('当前扩展与账号的草稿绑定不一致；请核对配对后重新绑定实际身份。');
+    if (!config.draftBridgeConnected) capability.blockers.push('本地草稿桥尚未连接浏览器扩展。启用扩展 MCP 连接后刷新状态。');
+    capability.steps.unshift('仅保存 article 格式的文章草稿；每次写入前重新核对平台身份，保存后打开草稿链接检查内容。');
+  }
   if (kind === 'video' && platform === 'youtube' && account?.provider === 'native') {
     capability.route = 'youtube_api';
     capability.blockers.push('发布前由 delivery worker 检查现有 OAuth、频道和实际视频；浏览器登录不代替授权。');
@@ -56,16 +73,18 @@ export function publishingCapability(platform: Platform, kind: ContentKind, acco
   if (kind === 'article' && account?.provider === 'postiz') {
     capability.route = 'postiz_api';
     if (!['reddit', 'x', 'linkedin'].includes(platform)) { capability.stage = 'unsupported'; capability.blockers.push('当前 Postiz 适配器仅支持 X、LinkedIn、Reddit 文字。'); return capability; }
+    capability.draftRoute = 'postiz';
     if (!config.postizConfigured) capability.blockers.push('Docker 服务未配置 POSTIZ_API_KEY。');
     if (!account.integrationId || !account.verifiedAt) capability.blockers.push('尚未只读核验匹配的 Postiz integration。');
     if (platform === 'reddit') { try { validateRedditTarget(account); } catch (error) { capability.blockers.push(error instanceof Error ? error.message : 'Reddit target is not ready.'); } }
-    if (account.status === 'connected' && capability.blockers.length === 0) { capability.stage = 'ready'; capability.automatic = true; capability.verification = 'provider_check'; }
+    if (account.status === 'connected' && capability.blockers.length === 0) { capability.stage = 'ready'; capability.automatic = true; capability.providerDraft = true; capability.verification = 'provider_check'; }
     else capability.stage = 'blocked';
     capability.steps.unshift('每次提交前重新查询 integration；审批引用属于操作人记录，不是平台审批查询结果。');
+    capability.steps.unshift('保存草稿使用独立动作，草稿仅保存在 Postiz 审稿区，不会写入目标平台的原生草稿箱。');
   }
   return capability;
 }
-export function publishingCapabilities(accounts: Account[], config: Parameters<typeof publishingCapability>[3] = {}): PublishingCapability[] {
+export function publishingCapabilities(accounts: Account[], config: PublishingCapabilityConfig = {}): PublishingCapability[] {
   const ordered = [...priorityPlatforms, ...platformIds.filter(platform => !priorityPlatforms.includes(platform as typeof priorityPlatforms[number]))];
   return ordered.flatMap(platform => {
     const targets = accounts.filter(account => account.platform === platform);

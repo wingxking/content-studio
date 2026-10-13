@@ -1,28 +1,64 @@
 import { useEffect, useState } from 'react';
-import type { Account, Draft, Job } from '../core/model.ts';
+import type { Account, Draft, Job, Variant } from '../core/model.ts';
 import { nativeUrls } from '../core/model.ts';
 import { type DownloadFile, type RunAction, errorMessage, labels, request, statusLabel } from './api.ts';
 
 type Handoff = { launch?: NonNullable<import('../core/model.ts').Variant['launch']>; articlePackageUrl?: string; requiresReconciliation: boolean; nativeUrl: string; title: string; text: string; tags: string[]; files: DownloadFile[]; steps: string[]; automatic: boolean; reason: string };
 const deliveryStatus = (status: string) => status === 'queued' ? '平台已接收 · 等待核验' : statusLabel(status);
 
+export function isDraftAccountReady(account: Account, variant?: Variant): boolean {
+  if (account.status !== 'connected' || variant?.platform !== account.platform) return false;
+  if (account.provider === 'native') return ['wechat', 'zhihu', 'bilibili'].includes(account.platform) && variant.format === 'article' && account.draftConnection?.adapter === 'wechatsync' && account.draftConnection.permissionConfirmed;
+  return ['x', 'linkedin', 'reddit'].includes(account.platform) && Boolean(account.integrationId);
+}
+
 export function PublishPanel({ draft, accounts, jobs, busy, dirty, action }: { draft: Draft; accounts: Account[]; jobs: Job[]; busy: boolean; dirty: boolean; action: RunAction }) {
   const [accountIds, setAccountIds] = useState<string[]>([]); const [privacy, setPrivacy] = useState<'private' | 'unlisted' | 'public'>('private');
   const [madeForKids, setMadeForKids] = useState(false); const [syntheticMedia, setSyntheticMedia] = useState(false);
   const [disclosure, setDisclosure] = useState('本视频由 AI 协助整理脚本并生成配音，信息来源详见正文，请自行核对重要事实。');
   const compatible = accounts.filter(account => draft.variants.some(variant => variant.platform === account.platform));
+  const selectedAccounts = compatible.filter(account => accountIds.includes(account.id));
+  const draftAccountsReady = selectedAccounts.length === accountIds.length && selectedAccounts.length > 0 && selectedAccounts.every(account => isDraftAccountReady(account, draft.variants.find(variant => variant.platform === account.platform)));
   const deliveries = jobs.filter(job => job.draftId === draft.id);
-  return <section className="publish-workspace"><div className="section-label"><div><span className="eyebrow">PUBLISH & VERIFY</span><h2>发布到目标账号</h2></div><span>每个平台分别跟踪</span></div><p className="hint">先保存稿件，核对当前版本并选择目标账号。点击下方按钮即授权发布当前版本；每个渠道分别显示自动执行或人工完成的步骤。</p>
+  return <section className="publish-workspace"><div className="section-label"><div><span className="eyebrow">PUBLISH & VERIFY</span><h2>保存草稿或发布到目标账号</h2></div><span>每个平台分别跟踪</span></div><p className="hint">先保存稿件，核对当前版本并选择目标账号。保存草稿只写入草稿箱；发布按钮单独授权发布当前版本。每个渠道分别记录结果。</p>
     <div className="publish-accounts">{compatible.map(account => <label className={`publish-account ${accountIds.includes(account.id) ? 'selected' : ''}`} key={account.id}><input type="checkbox" checked={accountIds.includes(account.id)} onChange={() => setAccountIds(ids => ids.includes(account.id) ? ids.filter(id => id !== account.id) : [...ids, account.id])}/><span><strong>{labels[account.platform]}</strong><small>{account.label}</small></span><span className={`badge ${account.status === 'connected' ? 'green' : 'amber'}`}>{statusLabel(account.status)}</span></label>)}</div>
     {!compatible.length && <p className="hint">当前稿件还没有可选择的账号，请先在“平台与账号”中登记并核验账号。</p>}
     {compatible.some(account => accountIds.includes(account.id) && account.platform === 'youtube') && <section className="youtube-publish-settings"><h3>YouTube 发布设置</h3><label>可见性<select value={privacy} onChange={event => setPrivacy(event.target.value as typeof privacy)}><option value="private">私密 · 仅自己可见</option><option value="unlisted">不公开列出 · 持链接可见</option><option value="public">公开</option></select></label><label className="inline-check"><input type="checkbox" checked={madeForKids} onChange={event => setMadeForKids(event.target.checked)}/>此视频是面向儿童的内容（Made for Kids）</label><label className="inline-check"><input type="checkbox" checked={syntheticMedia} onChange={event => setSyntheticMedia(event.target.checked)}/>包含需要披露的逼真合成或修改内容</label><label>AI 创作披露说明<textarea rows={2} minLength={10} maxLength={1000} value={disclosure} onChange={event => setDisclosure(event.target.value)}/></label><p className="hint">分类：教育 · 默认语言：简体中文。请按视频实际内容核对儿童受众、合成内容和披露说明。</p></section>}
     <button className="primary" disabled={busy || dirty || !accountIds.length || compatible.some(account => accountIds.includes(account.id) && account.platform === 'youtube') && disclosure.trim().length < 10} onClick={() => void action(() => request(`drafts/${draft.id}/publish`, { accountIds, expectedRevision: draft.revision, youtubeSettings: { privacyStatus: privacy, selfDeclaredMadeForKids: madeForKids, containsSyntheticMedia: syntheticMedia, categoryId: '27', defaultLanguage: 'zh-CN', descriptionDisclosure: disclosure } }), '各平台发布任务已创建，请逐个平台查看执行结果或完成操作。')}>授权并发布当前版本到所选账号 →</button>
+    <section className="note-card"><h3>只保存草稿，稍后在平台审核</h3><p>微信公众号、知乎与哔哩哔哩专栏需要先在“平台与账号”连接草稿扩展，并将对应适配稿格式设为文章。X、LinkedIn 和 Reddit 使用 Postiz 审稿草稿，保存在 Postiz，不会写入平台原生草稿箱。</p><button disabled={busy || dirty || !draftAccountsReady} onClick={() => void action(() => request(`drafts/${draft.id}/save-drafts`, { accountIds, expectedRevision: draft.revision }), '草稿保存任务已创建。请查看每个平台的草稿标识与链接，公开发布仍需另行操作。')}>授权并保存当前版本到所选草稿箱</button>{accountIds.length > 0 && !draftAccountsReady && <p className="hint">所选账号中有尚未连接草稿适配器或不支持此格式的目标。请先连接账号，并核对原生草稿的内容格式是否为文章。</p>}<p className="hint">公开发布队列暂停时仍可明确授权保存草稿。保存结果不明时先核对原草稿，不自动重试。</p></section>
     {dirty && draft.adaptationStatus !== 'pending' && <p className="hint">有未保存的编辑，请先保存修改并核对版本。</p>}
     <div className="job-list task-deliveries">{deliveries.toReversed().map(job => <JobPanel key={job.id} job={job} title={job.snapshot?.draft?.title ?? draft.title} account={accounts.find(account => account.id === job.accountId)} busy={busy} action={action}/>)}</div>
   </section>;
 }
 
-export function JobPanel({ job, title, account, busy, action }: { job: Job; title: string; account?: Account; busy: boolean; action: RunAction }) {
+type JobPanelProps = { job: Job; title: string; account?: Account; busy: boolean; action: RunAction };
+export function JobPanel(props: JobPanelProps) {
+  return props.job.deliveryAction === 'save_draft' ? <DraftJobPanel {...props}/> : <PublicationJobPanel {...props}/>;
+}
+
+function DraftJobPanel({ job, title, account, busy, action }: JobPanelProps) {
+  const receipt = job.draftReceipt;
+  const uncertain = ['needs_reconciliation', 'submitting', 'queued'].includes(job.status) || job.status !== 'draft_saved' && Boolean(job.providerPostId || job.remoteId || job.remoteUrl || receipt);
+  const canContinue = !uncertain && !receipt && job.attempts === 0 && ['failed', 'scheduled'].includes(job.status);
+  const destination = receipt?.destination === 'provider' || job.provider === 'postiz' ? 'Postiz 审稿草稿' : '平台原生草稿';
+  return <article className="panel job">
+    <div className="job-heading"><div><span className="eyebrow">{labels[job.platform]} · {job.snapshot?.account.label ?? account?.label}</span><h3>{title}</h3><p>{new Date(job.scheduledAt).toLocaleString('zh-CN')} · {destination} · 不执行公开发布</p></div><span className={`badge ${job.status === 'draft_saved' ? 'green' : job.status === 'failed' ? 'red' : 'amber'}`}>{statusLabel(job.status)}</span></div>
+    {job.error && <p className="inline-error" role="alert">{job.error}</p>}
+    {receipt && <section className="note-card"><h3>{destination}已记录</h3><p>草稿标识：{receipt.id}<br/>{receipt.verification === 'operator_verified' ? '已由操作人到草稿箱核对' : '适配器返回结果，尚需到草稿箱核对'}</p><a href={receipt.url} target="_blank" rel="noreferrer">打开已记录的草稿 ↗</a><p className="hint">此链接与标识属于草稿，不是公开发布回执。</p></section>}
+    <div className="job-actions"><a className="button" href={`/api/jobs/${job.id}/export`}>下载此次草稿内容包</a>{canContinue && <><button disabled={busy} onClick={() => void action(() => request(`jobs/${job.id}/continue`, {}), '已请求继续保存同一草稿任务。')}>继续保存草稿</button><button disabled={busy} onClick={() => void action(() => request(`jobs/${job.id}/cancel`, {}), '草稿任务已取消。')}>取消草稿任务</button></>}</div>
+    {uncertain && <div className="alert"><p>草稿提交结果需要核对。请查看原账号草稿列表，找到同一内容后记录草稿标识与链接；不要重复保存或另建任务。</p>{job.provider === 'postiz' ? <p>请在已连接的 Postiz 工作区中检查草稿列表。</p> : <a href={job.platform === 'bilibili' ? 'https://member.bilibili.com/platform/upload/text' : nativeUrls[job.platform]} target="_blank" rel="noreferrer">打开平台核对草稿 ↗</a>}</div>}
+    {(job.status === 'needs_reconciliation' || job.status === 'draft_saved' && receipt?.verification === 'adapter_reported') && <DraftReceiptForm key={`${job.id}:${receipt?.id ?? 'unknown'}`} job={job} busy={busy} action={action}/>}
+    <details><summary>不可变草稿历史</summary><ol className="history">{job.history.map((event, index) => <li key={`${index}-${event.at}`}><strong>{statusLabel(event.status)}</strong><span>{new Date(event.at).toLocaleString('zh-CN')}</span><p>{event.message}</p></li>)}</ol></details>
+  </article>;
+}
+
+function DraftReceiptForm({ job, busy, action }: Pick<JobPanelProps, 'job' | 'busy' | 'action'>) {
+  const [id, setId] = useState(job.draftReceipt?.id ?? '');
+  const [url, setUrl] = useState(job.draftReceipt?.url ?? '');
+  return <details open><summary>核对原草稿并保存记录</summary><p className="hint">在实际草稿列表中核对账号、正文与素材，再填写原草稿的标识和编辑链接。这不会发表内容。</p><div className="form-row"><label>实际草稿 ID<input value={id} onChange={event => setId(event.target.value)}/></label><label>实际草稿 URL<input type="url" value={url} onChange={event => setUrl(event.target.value)} placeholder="https://"/></label></div><button disabled={busy || !id.trim() || !url.trim()} onClick={() => void action(() => request(`jobs/${job.id}/draft-receipt`, { id: id.trim(), url: url.trim() }), '已记录经人工核对的草稿，未登记公开发布。')}>保存草稿核验记录</button></details>;
+}
+
+function PublicationJobPanel({ job, title, account, busy, action }: JobPanelProps) {
   const recordedRemoteIdentity = Boolean(job.providerPostId || job.remoteId || job.remoteUrl);
   const [url, setUrl] = useState(''); const [remoteId, setRemoteId] = useState('');
   const [handoff, setHandoff] = useState<Handoff | null>(null); const [handoffError, setHandoffError] = useState(''); const [copyMessage, setCopyMessage] = useState('');

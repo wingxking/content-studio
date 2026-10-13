@@ -20,6 +20,8 @@ import { registerGeneratedAsset } from '../core/assets.ts';
 import { createDeliveryRecoveryOperation, saveEditedDraft } from '../core/editor.ts';
 import { isManagedMediaPath, resolveMediaLocation } from '../core/media-location.ts';
 import { studioApi } from './studio-api.ts';
+import { draftConnectorApi } from './draft-api.ts';
+import { draftBridgeStatus } from '../core/draft-connectors.ts';
 
 await loadRuntimeEnvironment();
 
@@ -39,6 +41,7 @@ app.use(await createUploadRouter());
 app.use(createStreamingAssetRouter());
 app.use(express.json({ limit: '2mb', strict: true }));
 app.use('/api', studioApi);
+app.use('/api', draftConnectorApi);
 app.get('/healthz', (_req, res) => res.json({ ready: true }));
 app.get('/api/status', async (_req, res) => res.json({ state: await readState(), readiness: await doctor() }));
 app.post('/api/drafts/import', async (req, res) => { const input = z.object({ brief: briefSchema, content: generatedSchema }).parse(req.body); res.json(await createDraft(input.brief, input.content)); });
@@ -66,7 +69,10 @@ app.post('/api/drafts/:id/media', async (req, res) => {
   }
 });
 app.get('/api/schemas/content', (_req, res) => res.json(z.toJSONSchema(z.object({ brief: briefSchema, content: generatedSchema }))));
-app.get('/api/publishing/capabilities', async (_req, res) => res.json(publishingCapabilities((await readState()).accounts, { postizConfigured: Boolean(process.env.POSTIZ_API_KEY), expectedYoutubeChannel: expectedYouTubeChannelId })));
+app.get('/api/publishing/capabilities', async (_req, res) => {
+  const [state, bridge] = await Promise.all([readState(), draftBridgeStatus()]);
+  res.json(publishingCapabilities(state.accounts, { postizConfigured: Boolean(process.env.POSTIZ_API_KEY), expectedYoutubeChannel: expectedYouTubeChannelId, draftBridgeConnected: bridge.connected, draftBridgeExtensionId: bridge.extensionId }));
+});
 app.get('/api/publishing/integrations', async (_req, res) => res.json(await listIntegrations()));
 app.post('/api/accounts/:id/check', async (req, res) => res.json(await checkAccountConnection(z.uuid().parse(req.params.id))));
 app.post('/api/accounts', async (req, res) => res.json(await addAccount(accountSchema.omit({ id: true }).parse(req.body))));
@@ -86,7 +92,7 @@ app.get('/api/media', async (req, res) => {
   res.setHeader('Content-Disposition', `inline; filename="${basename(path).replace(/[^\w.-]/g, '_')}"`); res.sendFile(path, { dotfiles: 'allow' });
 });
 app.get('/api/docs/:name', async (req, res) => {
-  const name = z.enum(['research', 'accounts', 'architecture', 'acceptance', 'web-product-design.zh-CN', 'web-technical-architecture.zh-CN', 'research-web-workflows-2026-10-10.zh-CN', 'local-system-delivery.zh-CN', 'publishing-capabilities-upgrade-2026-10-11.zh-CN', 'publishing-competitors-and-codex-browser-2026-10-11']).parse(req.params.name);
+  const name = z.enum(['publishing-ecosystem-2026-10-13.zh-CN', 'research', 'accounts', 'architecture', 'acceptance', 'web-product-design.zh-CN', 'web-technical-architecture.zh-CN', 'research-web-workflows-2026-10-10.zh-CN', 'local-system-delivery.zh-CN', 'publishing-capabilities-upgrade-2026-10-11.zh-CN', 'publishing-competitors-and-codex-browser-2026-10-11']).parse(req.params.name);
   res.type('text/markdown').send(await readFile(resolve('docs', `${name}.md`), 'utf8'));
 });
 const errors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
