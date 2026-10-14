@@ -2,6 +2,8 @@
 
 日期：2026-10-14（Asia/Singapore）。状态：**待实施的 coding plan**，本文提交不代表功能完成、账号授权、远端草稿或公开发布完成。
 
+2026-10-14 implementation update: the owner selected original implementation only. No private BeeCMS code or DrissionPage dependency is redistributed. See [executed iteration and remaining gates](beecms-iteration-2026-10-14.md). The work packages below remain the acceptance target; their presence does not mean all live or browser gates have passed.
+
 ## 1. 目标、基线与范围
 
 目标是复用 BeeCMS 在具体平台上的操作经验，增强 Content Studio 的素材准备、账号会话、平台执行和效果采集；保留 Content Studio 的内容修订、审批、Supabase、LocalFS、持久化任务和异常恢复。

@@ -145,3 +145,10 @@ The original design requirements below are implemented in the local Web applicat
 ## Subsequent portable Docker implementation
 
 The deployed target now uses Docker for all local services. See [Docker runtime delivery](docker-runtime.md) for current source contracts, actual ARM bilingual CPU render and fresh D0 recovery evidence, supported private backup transfer and remaining acceptance gates. Historical native runtime/model/publication evidence above is not Docker acceptance. Authenticated Linux Codex structured/image execution has passed in Docker. Final source verification passed 176 tests, strict TypeScript and a production build; live PostgreSQL cancellation/schema checks and Docker public-source fetching also passed. Docker/Chrome acceptance now includes source-backed article generation, merge-preserving synchronization, scoped refinement, scheduled discovery and upload restart recovery. Final rebuilt-image acceptance passed with all 13 services, a fresh standalone Sol-generated script and decoded/download-hash-verified video, the separate model catalog, read-only YouTube verification and the requested Chrome profile. The 48-hour burn-in is still pending.
+
+
+## Original execution-layer iteration on k: 2026-10-14
+
+The original BeeCMS-inspired iteration adds durable account fencing, immutable finance image renditions, optional isolated browser fixtures and nullable queued metrics. Read [the phase evidence and remaining gates](beecms-iteration-2026-10-14.md). The existing WechatSync native-draft and Postiz provider-draft adapters are implemented; older statements that no draft adapters exist describe historical checkpoints. Real-platform draft acceptance is still distinct from the fake-extension transport test.
+
+Implementation/testing now targets k's isolated `.docker-k-acceptance` Docker runtime. Backup/restore verified 1,042 files and retained unresolved submission barriers without restoring browser profiles or authorization. Optional Chromium transfer, independent owner-profile checks, fresh model authorization, real finance adapters and 48-hour burn-in remain unpassed. No external post was submitted.

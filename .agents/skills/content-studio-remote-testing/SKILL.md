@@ -26,3 +26,13 @@ Read `AGENTS.md`, `docs/docker-runtime.md`, `docs/acceptance.md` and `docs/accou
 - Verify each platform's visible identity and permissions separately. Browser login does not establish API authorization, connector pairing or publishing eligibility. Re-pair an optional draft companion on `k`; establish Linux Codex and YouTube OAuth through the documented container flows when needed.
 - Follow current platform policy and revision/account approvals. Do not publish as a test unless explicitly authorized. Confirm drafts in their native editor; public publication requires a remote ID and platform URL. Reconcile unknown outcomes before retrying.
 - Record exact blockers and operator steps in `docs/accounts.md`; report remote setup incomplete until it is actually verified.
+
+## Executed k baseline and original adapter boundary
+
+Key authentication to `k@k.softshell-court.ts.net` and Docker runtime execution were verified on 2026-10-14. The accepted checkout path resolves to `/Users/k/x/content-studio`. Noninteractive SSH may omit Docker from PATH; prepend `$HOME/.docker/bin:/Applications/Docker.app/Contents/Resources/bin` for lifecycle commands. Use the existing isolated root `/Users/k/x/content-studio/.docker-k-acceptance`, project `content-studio-k-test`, web port 4310, Supabase 56421, database 56422 and companion 19527. Recheck health and source SHA each run; a past check is not current state.
+
+The owner explicitly chose **original implementation only** for the BeeCMS-inspired plan. Do not copy private BeeCMS adapters or its login state. The new optional Python/Playwright fixture executor and finance presets are original code. Live finance platforms stay disabled until a separately authorized and reviewed workflow passes acceptance. Chromium image transport is an actual compatibility blocker; unit fixtures cannot replace the explicit Docker browser smoke. See `docs/beecms-iteration-2026-10-14.md` for phase boundaries.
+
+Google sign-in on k was reported complete by the owner; it still needs an independent visible profile/target check before account work. Default restore intentionally excluded Linux Codex and delivery authentication. Keep model login and platform API authorization separate from Chrome login. Never retain supplied authentication material.
+
+Before backup/restore acceptance, remove only test-created download artifacts and keep fixture workspaces identifiable. Preserve encrypted minimum browser attempt journals even when restoring without account authorization; restored leases expire, unresolved submission barriers remain, and metric polling stays stopped. Do not restart schedules or publish queues merely because tests passed.
