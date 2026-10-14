@@ -64,3 +64,13 @@ Chrome 已现场核验 `radar` profile 邮箱 `radarxai@gmail.com`。YouTube Stu
 升级后加密备份 `.docker-backups/2026-10-14-ecosystem-final` 校验 **1,045 文件**；默认恢复到 `.docker-k-ecosystem-restore` 同样校验 1,045 文件。知识 object 与两个来源 manifest 共 3 文件 SHA 完全一致。恢复实例 paused=true、pending queue=0、active owned cron=0、account owners=0，模型和 YouTube 授权文件未恢复。恢复实例已停止并保留。原有账号、稿件和发布任务与升级前快照完全一致，工作实例发布和定时创作保持暂停。
 
 最新账号阻塞见 [accounts](accounts.md)。Linux 设备授权在未完成期间超过 15 分钟；需本人重新启动官方流程。原生 Chrome 因 k 锁屏无法继续，但已独立核验 radar profile 和 YouTube Studio 目标频道。可选 Selenium image 下载未在生命周期 timeout 内完成，实际 Docker Chromium smoke 仍未通过。无 Postiz key/扩展配对、无新真实草稿或公开提交，不能声称所有平台已自动发布。阶段二、全新一键安装/客户端、PDF/Office、48 小时稳定运行和逐平台 live 验收仍未完成。
+
+## 2026-10-15 知乎验收续接
+
+用户选择优先验收知乎文章草稿。k 解锁后，原生 Chrome 菜单再次确认 radarxai@gmail.com；知乎首页已登录为「孔涛」，个人主页为 `https://www.zhihu.com/people/kong-tao-1-90`。此结果解除浏览器登录阻塞，尚未证明扩展 UID、文章权限或草稿落库。
+
+容器仍返回 Not logged in，新的官方设备登录在 Google/OpenAI 后停在 Phone number required；手机号、短信和最终设备授权交给本人。官方商店 WechatSync 2.0.9 的安装框请求读取和更改所有网站数据、管理下载，安装及本地草稿桥配对等待当前实际权限确认。尚无配对或真实平台写入。账号步骤与边界见 [accounts](accounts.md)。
+
+新增人工显式执行的 `tests/ecosystem-live-generation.ts`，用于独立持久化 bind 和随机 Supabase workspace 的真实母稿、知乎文章生成。使用合成的非私密软件知识材料，保留固定摘录、运行、修订和生成文件哈希；没有模拟模型、审批、账号配对、投递或清理路径。失败保留 manifest 和快照，修复授权后显式 `--retry`。这份脚本及其 TypeScript 检查本身不算真实模型生成或平台草稿验收。
+
+脚本增量 Docker 严格 TypeScript 检查通过。实际 one-off Docker 预检在 `readiness` 处返回 `workspaceInitializationAttempted=false`；随后直接查询 Supabase，随机工作区 `a95e8c1b-966e-4190-b074-28be2dd66017` 的行数为 0。仅保留私有目录 `qa-live/zhihu-live-pFLXZR/live-generation.json` 供显式恢复，没有任务、稿件、账号或投递。独立审查补齐进程中断后的 active run 重试：等待原 lease/队列可见性到期，领取原消息并沿用快照，不另建 run 或自动重送。

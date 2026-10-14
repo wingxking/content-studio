@@ -2,6 +2,34 @@
 
 Required identity: **Chrome profile `radarxai@gmail.com`** for Google sign-in, Supabase, debugging, and platform test accounts when Google is supported. Verify the visible Chrome profile before account operations. Use another identity only after explicit user direction.
 
+## k account continuation: 2026-10-15
+
+The owner selected **Zhihu article drafts** for the next live acceptance route. k was unlocked, and the native Chrome profile menu independently showed **radarxai@gmail.com**. Zhihu's authenticated home page showed **孔涛**, with the profile link `https://www.zhihu.com/people/kong-tao-1-90`. This resolves the earlier browser-login blocker only; the extension's actual platform UID, article editor permission and a saved draft are still separate checks.
+
+The Linux model container still reported **Not logged in** after the owner's earlier completion message. A fresh official device-login process was started in the same isolated container. Google/OpenAI sign-in using the verified radar identity reached **Phone number required** at `https://auth.openai.com/add-phone`. The owner must complete phone/SMS verification, any account terms and the final device grant, then container login/readiness must be checked independently. Never copy another profile's authentication or retain codes; expired codes require a new process.
+
+The radar extensions inventory contained ChatGPT and Google Docs Offline, with no WechatSync. The [official WechatSync site](https://www.wechatsync.com/) linked to Chrome Web Store ID `hchobocdmclopcbnibdnoafilagadion`; the store showed **2.0.9**, updated April 1, 2026. Its installation dialog requested **Read and change all your data on all websites** and **Manage your downloads**. Installation and local draft-bridge pairing are awaiting action-time owner confirmation of that expanded browser access. No extension was installed or paired by this check. After approval, install from the same official listing, transfer pairing secrets only between the extension and local Accounts UI, check the actual Zhihu identity, and authorize one reviewed revision/account before saving the test draft. Keep the original revision, job and private journal if any dispatch has an unknown result.
+
+Publishing and creator scheduling remain paused. No real platform draft or new public post was created in this continuation checkpoint.
+
+### Isolated real-model generation after authorization
+
+The manual `tests/ecosystem-live-generation.ts` script requires an explicit confirmation flag and a separate persistent bind. It generates only an unapproved master and Zhihu article in a random Supabase workspace, preserving the knowledge snapshot and output hashes. It does not pair accounts, save remote drafts or publish. On this k instance its actual authorization preflight stopped at `readiness`, and the database query confirmed that the random workspace was not created. The preserved manifest is under `qa-live/zhihu-live-pFLXZR`; use the retry command below only after actual container authorization succeeds. Replace the bind root on another machine; never transfer authentication with it.
+
+```sh
+STUDIO_ACCEPTANCE_RUNTIME=/absolute/private-root
+
+docker compose --project-directory "$PWD" \
+  --env-file "$STUDIO_ACCEPTANCE_RUNTIME/config/compose.env" -f infra/compose.yml \
+  run --rm --no-deps --entrypoint node \
+  --volume "$PWD/tests:/app/tests:ro" \
+  --volume "$STUDIO_ACCEPTANCE_RUNTIME/qa-live:/acceptance-live" \
+  api --import tsx tests/ecosystem-live-generation.ts \
+  --confirm-isolated-generation --retry --root /acceptance-live/zhihu-live-pFLXZR
+```
+
+For a new acceptance run, create a private `qa-live` directory under the chosen ignored runtime root first, replace `--retry --root ...` with `--root /acceptance-live --model <available-catalog-id>`, and retain the reported child directory. Failures report a safe stage and keep the original run. An interrupted active run must wait for its original lease/queue visibility to expire before an explicit retry; do not create a replacement task. A remote draft test still requires inspecting the generated content, binding the actual platform identity and approving that exact revision/account.
+
 ## Latest k verification: automation/knowledge upgrade, 2026-10-14
 
 This run independently switched from another open Chrome profile to `radar`, opened its profile menu, and verified **radarxai@gmail.com** before account work. YouTube Studio showed **RadarXAI**, channel `UCVUtH6reLkEuMrUuTh-XgjQ`, and the existing education video. This supersedes the earlier operator-attested profile statement below. No existing platform post or account settings were changed.
