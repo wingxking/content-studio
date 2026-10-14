@@ -2,6 +2,12 @@
 
 Required identity: **Chrome profile `radarxai@gmail.com`** for Google sign-in, Supabase, debugging, and platform test accounts when Google is supported. Verify the visible Chrome profile before account operations. Use another identity only after explicit user direction.
 
+## Remote testing target: 2026-10-14
+
+The owner selected device `k`, checkout `~/x/content-studio`, for subsequent iteration and runtime acceptance. Create or select the dedicated Chrome profile `radarxai@gmail.com` on that device and verify it before account operations. Source-Mac browser sessions do not establish remote sign-in. Password entry is pending owner input; no password is stored in project instructions or skills.
+
+Initial SSH verification reached `k` but failed authentication. A dedicated source-Mac public key was prepared; the operator must install it in the remote user's `~/.ssh/authorized_keys`, or provide a working remote execution connection. Recheck authenticated access before pulling or starting services. Remote checkout, Docker startup, profile creation and platform sign-ins have not yet been verified. Follow [the remote-testing skill](../.agents/skills/content-studio-remote-testing/SKILL.md) and [Docker transfer instructions](docker-runtime.md).
+
 Observed on 2026-10-10: Chrome displayed `coding (radarxai@gmail.com)` and an authenticated Supabase dashboard. The existing `radar` organization displayed **EXCEEDING USAGE LIMITS** and “Grace period is over”, while its project showed Healthy. This is point-in-time UI evidence; it does not establish capacity for a new project. No existing radar database was modified for Content Studio.
 
 ## Draft companion account baseline: 2026-10-13

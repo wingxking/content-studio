@@ -7,6 +7,7 @@
 - Article and video are independent domains, workspaces, jobs and tools, sharing evidence, immutable physical assets and infrastructure. Video creation and rendering remain explicit actions; article linkage is optional and revision-bound.
 - Prefer maintained upstream execution/tool capabilities. Evaluate pg-boss behind an isolated migration gate; never run two engines or schedule owners for the same work. Article/video deliveries share one account-serialization domain; unknown submission outcomes require reconciliation.
 - Use Chrome profile `radarxai@gmail.com` for Google, Supabase, and test-platform account operations. Verify the profile in Chrome before sign-in; never use another account silently.
+- Subsequent iteration and runtime acceptance testing target device `k`, with checkout `~/x/content-studio` from `https://github.com/wingxking/content-studio`. Use `.agents/skills/content-studio-remote-testing/SKILL.md` for synchronization, Docker startup and account tests. Preserve the source Mac instance until remote restore and acceptance pass.
 - Use Supabase whenever a database is required. Do not add SQLite, MongoDB, or a separate PostgreSQL deployment.
 - Keep strict TypeScript, no `any`, named exports, and small scoped changes.
 - Prefer maintained upstream publishing integrations. Do not add speculative unofficial platform API calls or claim browser handoff equals automatic publishing.
