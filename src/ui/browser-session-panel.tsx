@@ -1,0 +1,10 @@
+import { useEffect, useState } from 'react';
+import { request, errorMessage, type RunAction } from './api.ts';
+type Status = { configured: boolean; available?: boolean; fixture?: boolean; started?: boolean; handoff?: boolean };
+export function BrowserSessionPanel({ busy, action }: { busy: boolean; action: RunAction }) {
+ const [status, setStatus] = useState<Status | null>(null); const [error, setError] = useState('');
+ useEffect(() => { let active = true; void request<Status>('browser-publisher/status').then(value => { if (active) setStatus(value); }).catch(caught => { if (active) setError(errorMessage(caught)); }); return () => { active = false; }; }, []);
+ if (!status?.configured && !error) return null;
+ const control = (command: 'start' | 'handoff' | 'resume' | 'close') => action(async () => { await request('browser-publisher/session', { action: command }); setStatus(await request<Status>('browser-publisher/status')); }, 'Isolated browser session updated.');
+ return <section className="panel"><h2>Isolated browser fixture session</h2><p>External platform execution is disabled. This slot tests session ownership and recovery in Docker.</p>{error && <p role="alert">{error}</p>}<p role="status">{status?.available ? status.handoff ? 'Manual handoff active · automation stopped' : status.started ? 'Session ready for fixture checks' : 'Session stopped' : 'Optional executor unavailable'}</p>{status?.fixture && <div className="job-actions"><button disabled={busy || !status.available || status.handoff} onClick={() => void control('start')}>Start / check session</button><button disabled={busy || !status.available || !status.started || status.handoff} onClick={() => void control('handoff')}>Pause and take over</button><button disabled={busy || !status.available || !status.handoff} onClick={() => void control('resume')}>Return control</button><button disabled={busy || !status.available || !status.started} onClick={() => void control('close')}>Close session</button></div>}<a href="/api/docs/accounts" target="_blank" rel="noreferrer">Private noVNC access and account prerequisites</a></section>;
+}

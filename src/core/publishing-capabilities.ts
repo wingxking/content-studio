@@ -49,6 +49,7 @@ export function publishingCapability(platform: Platform, kind: ContentKind, acco
   if (kind === 'video' && !['youtube', 'tiktok', 'bilibili', 'kuaishou', 'douyin'].includes(platform)) {
     capability.stage = 'unsupported'; capability.canVerify = false; capability.blockers.push('当前独立视频流水线未接入此目标。'); return capability;
   }
+  if (['xueqiu', 'gelonghui', 'guba'].includes(platform)) { capability.automatic = false; capability.remoteDraft = false; capability.blockers.push('Finance pilot disabled. Original fixture code is implemented; live account permission, page adapter and remote acceptance remain unverified.'); }
   if (platform === 'producthunt') capability.blockers.push('仅产品上线资料；需要真实产品网址和个人账号 onboarding。默认 API 只读；本项目没有创建产品的写入适配器。');
   if (platform === 'wechat') capability.blockers.push('官方发布权限须逐账号检查；个人及部分未认证账号无法使用群发接口。可连接受支持的扩展保存文章草稿，公开发布仍在平台人工完成。');
   if (platform === 'zhihu') capability.blockers.push('当前提供专栏稿件与原生编辑器；未安装或未验证扩展时，不宣称已同步远端草稿。');

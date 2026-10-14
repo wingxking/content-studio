@@ -8,7 +8,7 @@ import test from 'node:test';
 import { addAccount, approveDraft, cancelJob, createDraft, replaceDraft, runDueJobs, scheduleJob } from '../src/core/pipeline.ts';
 import { mutateState, readState } from '../src/core/store.ts';
 import { authorizeDesktopYouTube, desktopYouTubeTokenProvider, readPrivateJson, writePrivateJson, youtubeScopes } from '../src/core/youtube-oauth.ts';
-import { expectedYouTubeChannelId, reconcileYouTubeJob, resumeYouTubeJob, uploadYouTubeJob, verifyYouTubeChannel } from '../src/core/youtube.ts';
+import { collectYouTubeJobMetrics, expectedYouTubeChannelId, reconcileYouTubeJob, resumeYouTubeJob, uploadYouTubeJob, verifyYouTubeChannel } from '../src/core/youtube.ts';
 
 const videoId = 'AbCdeF123_-';
 const session = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=fixture';
@@ -102,12 +102,12 @@ test('manual reconciliation refuses an upload whose local submission owner is al
     await sending.promise;
     const before = (await readState()).jobs[0]; assert.ok(before); assert.equal(before.status, 'submitting');
     let requests = 0;
-    await assert.rejects(reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch(() => { requests++; return readback(); }) }), /owner is still running/);
+    await assert.rejects(reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch(() => { requests++; return readback(); }) }), /busy|owner is still running/);
     const after = (await readState()).jobs[0]; assert.deepEqual(after, before); assert.equal(requests, 0);
     response.resolve(json({ id: videoId }, 201)); assert.equal((await upload).status, 'published');
   } finally { response.resolve(json({ id: videoId }, 201)); await upload?.catch(() => undefined); await fixtureData.cleanup(); }
 });
-test('a delayed readback cannot downgrade a newer confirmed publication', async () => {
+test('same-account readbacks serialize, and a subsequent confirmed publication remains authoritative', async () => {
   const fixtureData = await fixture(); const reading = deferred<void>(); const response = deferred<Response>();
   let earlier: Promise<Awaited<ReturnType<typeof reconcileYouTubeJob>>> | undefined;
   try {
@@ -117,10 +117,11 @@ test('a delayed readback cannot downgrade a newer confirmed publication', async 
       reading.resolve(); return response.promise;
     }) });
     await reading.promise;
+    await assert.rejects(reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch() }), /busy/);
+    response.resolve(readback('private'));
+    assert.equal((await earlier).status, 'delivered');
     const newer = await reconcileYouTubeJob(fixtureData.id, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch() });
     assert.equal(newer.status, 'published');
-    response.resolve(readback('private'));
-    assert.deepEqual(await earlier, newer);
     assert.deepEqual((await readState()).jobs[0], newer);
   } finally { response.resolve(readback('private')); await earlier?.catch(() => undefined); await fixtureData.cleanup(); }
 });
@@ -338,4 +339,28 @@ test('container OAuth uses a fixed published loopback port and retains Host/stat
     }, fetcher: mockFetch((_url, init) => { const form = init.body as URLSearchParams; assert.equal(form.get('redirect_uri'), `http://127.0.0.1:${port}/oauth2/callback`); assert.equal(createHash('sha256').update(form.get('code_verifier') ?? '').digest('base64url'), challenge); return json({ access_token: 'fixture', refresh_token: 'fixture', expires_in: 3600, token_type: 'Bearer', scope: youtubeScopes.join(' ') }); }) });
     assert.deepEqual(result, { authorized: true });
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('official metrics use the frozen video after article edits and preserve zero versus unavailable fields', async () => {
+ const data = await fixture();
+ try {
+  await uploadYouTubeJob(data.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch() });
+  await mutateState(state => { const draft = state.drafts[0]; if (draft) { draft.revision++; draft.title = 'Newer current article'; } });
+  const observed = await collectYouTubeJobMetrics(data.id, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => {
+   assert.equal(init.method, 'GET');
+   if (url.pathname === '/youtube/v3/channels') return json({ items: [{ id: expectedYouTubeChannelId }] });
+   assert.equal(url.searchParams.get('id'), videoId); assert.equal(url.searchParams.get('part'), 'snippet,statistics');
+   return json({ items: [{ id: videoId, snippet: { channelId: expectedYouTubeChannelId }, statistics: { viewCount: '0', likeCount: '2' } }] });
+  }) });
+  assert.equal(observed.views, 0); assert.equal(observed.likes, 2); assert.equal(observed.comments, null); assert.equal(observed.shares, null); assert.equal(observed.source, 'official_api');
+ } finally { await data.cleanup(); }
+});
+test('metrics reject account mismatch and surface rate-limit and authorization errors without an observation', async () => {
+ const data = await fixture();
+ try {
+  await uploadYouTubeJob(data.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch() });
+  for (const status of [429, 401]) await assert.rejects(collectYouTubeJobMetrics(data.id, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch(url => url.pathname === '/youtube/v3/channels' ? json({ items: [{ id: expectedYouTubeChannelId }] }) : json({}, status, { 'Retry-After': '120' })) }), caught => caught instanceof Error && 'metricCode' in caught && caught.metricCode === (status === 429 ? 'RATE_LIMIT' : 'AUTH_REQUIRED'));
+  await assert.rejects(collectYouTubeJobMetrics(data.id, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch(url => url.pathname === '/youtube/v3/channels' ? json({ items: [{ id: expectedYouTubeChannelId }] }) : json({ items: [{ id: videoId, snippet: { channelId: 'wrong-channel' }, statistics: { viewCount: '100' } }] })) }), /unavailable for the expected account/);
+  assert.equal((await readState()).jobs[0]?.metrics.length, 0);
+ } finally { await data.cleanup(); }
 });

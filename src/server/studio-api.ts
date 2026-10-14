@@ -1,4 +1,6 @@
-import { adaptArticleImage, imageRecipeSchema } from '../core/article-tools.ts';
+import { browserPublisherStatus, controlBrowserFixtureSession } from '../core/browser-publisher.ts';
+import { getJobMetrics, queueMetricCollection, configureMetricPolling } from '../core/metrics.ts';
+import { adaptArticleImage, imageAdaptationInputSchema } from '../core/article-tools.ts';
 import { createDeliveryRecoveryOperation, createVideoOperation, listVideoOperations } from '../core/editor.ts';
 import { createVideoProject, getIndependentVideoProject, listIndependentVideoProjects, updateVideoProject, approveVideoRevision, applyVideoRefinement, cancelVideoRender } from '../core/video.ts';
 import { videoCreateInputSchema, videoEditInputSchema } from '../core/video-model.ts';
@@ -44,7 +46,7 @@ studioApi.get('/runs', async (_req, res) => res.json(await listTaskRuns()));
 studioApi.get('/runs/:id', async (req, res) => res.json(await getTaskRun(id(req.params.id))));
 studioApi.post('/runs/:id/cancel', async (req, res) => res.json(await cancelTaskRun(id(req.params.id))));
 studioApi.post('/runs/:id/retry', async (req, res) => res.json(await retryTaskRun(id(req.params.id))));
-studioApi.post('/assets/:id/adapt', async (req, res) => res.json(await adaptArticleImage(id(req.params.id), imageRecipeSchema.parse(req.body))));
+studioApi.post('/assets/:id/adapt', async (req, res) => res.json(await adaptArticleImage(id(req.params.id), imageAdaptationInputSchema.parse(req.body))));
 studioApi.get('/assets/library', async (_req, res) => res.json(await listAssets()));
 studioApi.get('/assets/:id/file', async (req, res) => { const path = await resolveAssetPath(id(req.params.id)); res.sendFile(path, { dotfiles: 'allow' }); });
 studioApi.get('/drafts/:id/editor', async (req, res) => res.json(await getEditor(id(req.params.id))));
@@ -99,3 +101,10 @@ async function runFiles(runId: string): Promise<{ name: string; path: string }[]
 }
 studioApi.get('/runs/:id/files', async (req, res) => { const runId = id(req.params.id); res.json((await runFiles(runId)).map(file => ({ name: file.name, url: `/api/runs/${runId}/files/${encodeURIComponent(file.name)}` }))); });
 studioApi.get('/runs/:id/files/:name', async (req, res) => { const file = (await runFiles(id(req.params.id))).find(item => item.name === req.params.name); if (!file) throw new Error('File not found.'); res.download(file.path, file.name, { dotfiles: 'allow' }); });
+
+studioApi.get('/jobs/:id/metrics', async (req, res) => res.json(await getJobMetrics(id(req.params.id))));
+studioApi.post('/jobs/:id/metrics/collect', async (req, res) => res.json(await queueMetricCollection(id(req.params.id))));
+studioApi.post('/jobs/:id/metrics/poll', async (req, res) => res.json(await configureMetricPolling(id(req.params.id), req.body)));
+
+studioApi.get('/browser-publisher/status', async (_req, res) => res.json(await browserPublisherStatus()));
+studioApi.post('/browser-publisher/session', async (req, res) => res.json(await controlBrowserFixtureSession(req.body)));

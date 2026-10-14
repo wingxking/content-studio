@@ -20,3 +20,7 @@
 .capability-panel { margin-bottom: 24px; }
 .capability-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
 .capability-grid li { margin-bottom:8px; }
+
+.metric-observations { overflow-x: auto; }
+.metric-observations th, .metric-observations td { padding: .5rem; text-align: left; white-space: nowrap; }
+.asset-downloads ~ figure img, .panel > figure img { max-width: 32rem; width: 100%; height: auto; }

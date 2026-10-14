@@ -12,10 +12,10 @@ from uuid import uuid4
 
 root = Path(os.environ.get("STUDIO_DATA_DIR", "/data"))
 project_id = str(uuid4())
-work = root / "acceptance" / project_id
+work = root / "renderers" / "acceptance" / project_id
 work.mkdir(parents=True)
 renderer = os.environ.get("RENDERER_ORIGIN", "http://127.0.0.1:8900")
-tts = os.environ.get("TTS_ORIGIN", "http://studio-d5-tts:8880")
+tts = os.environ.get("TTS_ORIGIN", "http://tts:8880")
 
 
 def post(origin: str, endpoint: str, body: dict) -> bytes:

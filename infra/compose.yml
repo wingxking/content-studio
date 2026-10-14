@@ -77,6 +77,8 @@ services:
     volumes:
       - "${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"
       - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/draft-bridge:/data/draft-bridge"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/browser-publisher:/data/browser-publisher"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/browser-staging:/data/browser-staging"
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:4310/healthz',{headers:{host:process.env.STUDIO_PUBLIC_ORIGIN.replace('http://','')}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
@@ -130,6 +132,8 @@ services:
       - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/youtube:/data/youtube"
       - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/google:/data/google"
       - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/draft-bridge:/data/draft-bridge:ro"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/browser-publisher:/data/browser-publisher:ro"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/browser-staging:/data/browser-staging"
 
   draft-bridge:
     image: ${STUDIO_APPLICATION_IMAGE:-content-studio:local}
@@ -201,3 +205,45 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/tts-cache:/tts-cache"]
+
+  browser:
+    profiles: [browser-publisher]
+    image: selenium/standalone-chromium:4.41.0-20260222@sha256:36474a4c56765ec3d04dc4cbac57a021e0d88e89fdb5dca297a50f1100279c1a
+    shm_size: 2gb
+    restart: unless-stopped
+    environment:
+      SE_NODE_MAX_SESSIONS: "1"
+      SE_NODE_SESSION_TIMEOUT: "1800"
+      SE_ENABLE_TRACING: "false"
+      SE_VNC_PASSWORD: "${STUDIO_BROWSER_VNC_PASSWORD:-unconfigured}"
+    ports: ["127.0.0.1:${STUDIO_BROWSER_VNC_PORT:-17900}:7900"]
+    volumes:
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/browser-private/profiles:/home/seluser/profiles"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/browser-staging:/staging:ro"
+    healthcheck:
+      test: [CMD, /opt/bin/check-grid.sh, --host, "0.0.0.0", --port, "4444"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+  browser-publisher:
+    profiles: [browser-publisher]
+    image: content-studio-browser-publisher:local
+    build: {context: "${STUDIO_PROJECT_DIR:-..}", dockerfile: services/browser-publisher/Dockerfile}
+    user: "${STUDIO_UID:-1000}:${STUDIO_GID:-1000}"
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,nosuid,size=128m"]
+    restart: unless-stopped
+    depends_on: {browser: {condition: service_healthy}}
+    volumes:
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/browser-publisher:/config:ro"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/browser-private/state:/state"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/data/browser-journals:/journals"
+      - "${STUDIO_DOCKER_ROOT:-../.docker}/browser-staging:/staging:ro"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8916/healthz',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12

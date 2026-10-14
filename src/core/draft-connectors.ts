@@ -1,3 +1,4 @@
+import { markAccountDispatch } from './account-execution.ts';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { readDraftBridgeConfig, saveDraftBridgeConfig, draftBridgeConfigSchema } from './draft-bridge-config.ts';
@@ -27,6 +28,7 @@ export async function draftBridgeRequest(method: 'checkAuth' | 'syncArticle', pa
   const config = await readDraftBridgeConfig();
   if (!config) throw new Error('Configure the browser draft companion in Accounts first.');
   const timeout = AbortSignal.timeout(method === 'syncArticle' ? 13 * 60_000 : 35_000);
+  if (method === 'syncArticle') await markAccountDispatch();
   const response = await fetch(`${bridgeBase()}/request`, { method: 'POST', headers: { Authorization: `Bearer ${config.serviceKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ method, params }), redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   if (!response.ok) throw new Error('The draft companion could not complete the request. Check the connection and inspect the platform draft box before retrying a save.');
   return z.object({ result: z.unknown() }).parse(await response.json()).result;
@@ -80,6 +82,7 @@ export async function bindDraftAccount(platform: Platform, input: z.infer<typeof
     if (state.jobs.some(job => job.snapshot?.account.platform === platform && job.snapshot.account.draftConnection?.userId === identity.userId && ['submitting', 'needs_reconciliation'].includes(job.status))) throw new Error('Resolve the existing delivery for this platform identity before rebinding it.');
     if (!account) { account = { id: randomUUID(), platform, label: identity.username || `${platform} ${identity.userId}`, provider: 'native', integrationId: '', status: 'connected', note: 'Browser companion draft connection; public publishing remains a separate action.', verifiedAt: null }; state.accounts.push(account); }
     account.draftConnection = { adapter: 'wechatsync', userId: permission.expectedUserId, extensionId: config.extensionId, checkedAt: new Date().toISOString(), permissionConfirmed: true };
+    account.physicalIdentity = { id: permission.expectedUserId, verification: 'browser', verifiedAt: account.draftConnection.checkedAt };
     account.status = 'connected'; account.verifiedAt = account.draftConnection.checkedAt;
     return account;
   });

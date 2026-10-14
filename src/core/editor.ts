@@ -16,7 +16,7 @@ import { resolveGenerationContext } from './generation-context.ts';
 const now = (): string => new Date().toISOString();
 const workspace = (): string => z.uuid().parse(process.env.STUDIO_WORKSPACE_ID);
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
-const operationRow = z.object({ id: z.uuid(), draft_id: z.uuid().nullable(), subject_kind: z.enum(['article', 'video']).default('article'), subject_id: z.uuid().nullable().optional(), kind: z.enum(['sync', 'refine', 'video_script', 'video_render', 'publish', 'delivery_recovery']), status: z.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']), phase: z.string(), input: z.record(z.string(), z.unknown()), output: z.unknown(), error: z.string().nullable(), created_at: z.string(), updated_at: z.string() });
+const operationRow = z.object({ id: z.uuid(), draft_id: z.uuid().nullable(), subject_kind: z.enum(['article', 'video']).default('article'), subject_id: z.uuid().nullable().optional(), kind: z.enum(['sync', 'refine', 'video_script', 'video_render', 'publish', 'delivery_recovery', 'collect_metrics']), status: z.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled']), phase: z.string(), input: z.record(z.string(), z.unknown()), output: z.unknown(), error: z.string().nullable(), created_at: z.string(), updated_at: z.string() });
 export type Operation = ReturnType<typeof presentOperation>;
 function presentOperation(row: z.infer<typeof operationRow>) {
   return { id: row.id, draftId: row.draft_id, subjectKind: row.subject_kind, subjectId: row.subject_id ?? row.draft_id, kind: row.kind, status: row.status, phase: row.phase, input: row.input, output: row.output, error: row.error, createdAt: row.created_at, updatedAt: row.updated_at };
@@ -212,6 +212,11 @@ export async function handleStudioOperation(id: string, parentSignal: AbortSigna
     if (!rows.length) { controller.abort(); throw new Error('Operation cancelled or ownership changed.'); }
   };
   try {
+    if (operation.kind === 'collect_metrics') {
+      const { handleMetricCollection } = await import('./metrics.ts');
+      const result = await handleMetricCollection(id, token, operation.input, signal);
+      await patch({ status: result.collected ? 'succeeded' : 'failed', phase: result.collected ? 'Metrics observation saved' : 'Metrics need attention', output: result, error: result.collected ? null : result.error, lease_until: null }); return;
+    }
     if (operation.kind === 'delivery_recovery') {
       const { continuePublication } = await import('./delivery.ts'); const { resumeYouTubeJob } = await import('./youtube.ts');
       const { reconcileJob, runDueJobs } = await import('./pipeline.ts'); const input = z.object({ jobId: z.uuid().nullable(), action: z.enum(['continue', 'reconcile', 'resume', 'dispatch', 'verify_channel']) }).parse(operation.input);

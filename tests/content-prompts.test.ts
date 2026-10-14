@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { buildArticlePrompt, buildDiscoveryPrompt, buildRefinementPrompt, buildVideoScriptPrompt, discoveryPromptInputSchema, platformEditorialGuidance, platformGuidancePrompt, videoScriptPromptInputSchema } from '../src/core/content-prompts.ts';
 import { generateContent } from '../src/core/generator.ts';
-import { generatedSchema, platformIds, type Brief, type Generated } from '../src/core/model.ts';
+import { generatedSchema, allPlatformIds, platformIds, type Brief, type Generated } from '../src/core/model.ts';
 import { createDraft } from '../src/core/pipeline.ts';
 import { readState } from '../src/core/store.ts';
 
@@ -87,7 +87,7 @@ test('an allowed envelope must retain exact requested platform order', async () 
 });
 
 test('all supported platforms have guidance and invalid or duplicate targets are rejected', () => {
-  assert.deepEqual(Object.keys(platformEditorialGuidance).sort(), [...platformIds].sort());
+  assert.deepEqual(Object.keys(platformEditorialGuidance).sort(), [...allPlatformIds].sort());
   for (const platform of platformIds) assert.ok(platformEditorialGuidance[platform].length > 0);
   assert.throws(() => platformGuidancePrompt(['x', 'x']), /unique/);
   assert.throws(() => discoveryPromptInputSchema.parse({ platforms: ['unknown'], audience: 'Creators', instruction: 'Find practical questions', sources: [] }));

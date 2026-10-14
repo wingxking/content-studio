@@ -1,3 +1,6 @@
+import { financeCommunityPreview } from './finance-platforms.ts';
+import { financePlatformIds } from './model.ts';
+import { withJobExecution } from './account-execution.ts';
 import { validateLaunchVariant } from './publishing-capabilities.ts';
 import { resolveAssetPath } from './assets.ts';
 import type { ArticleNode } from './article-document.ts';
@@ -92,10 +95,11 @@ function targetHash(draft: Draft, variant: Variant, account: Account): string {
 async function contentKey(variant: Variant, account: Account): Promise<string> {
   const mediaHashes = await Promise.all(variant.mediaPaths.map(async path => (await mediaInfo(path)).hash));
   const content = account.provider === 'postiz' ? canonicalPostizContent(variant) : { title: variant.title, text: variant.text, tags: variant.tags };
-  return digest({ content, mediaHashes, accountId: account.id, platform: account.platform, provider: account.provider, integrationId: account.integrationId, ...(variant.format ? { format: variant.format } : {}), ...(account.platform === 'reddit' ? { title: variant.title, reddit: account.reddit } : {}), ...(variant.launch ? { launch: variant.launch } : {}) });
+  return digest({ content, mediaHashes, accountId: account.id, platform: account.platform, provider: account.provider, integrationId: account.integrationId, ...(variant.format ? { format: variant.format } : {}), ...(account.platform === 'reddit' ? { title: variant.title, reddit: account.reddit } : {}), ...(variant.launch ? { launch: variant.launch } : {}), ...(variant.finance ? { finance: variant.finance } : {}) });
 }
 async function validateMedia(variant: Variant): Promise<void> {
   validateLaunchVariant(variant);
+  if ((financePlatformIds as readonly string[]).includes(variant.platform)) financeCommunityPreview(variant);
   const files = await Promise.all(variant.mediaPaths.map(mediaInfo));
   if (videoPlatforms.has(variant.platform) && !(variant.platform === 'bilibili' && variant.format === 'article') && !files.some(file => file.video)) throw new Error('This channel requires a real video file. A generated script is not a publishable video; attach an actual video first.');
 }
@@ -146,6 +150,7 @@ export async function approveDraft(id: string, expectedRevision?: number): Promi
 export async function addAccount(input: Omit<Account, 'id'>): Promise<Account> {
   const account = accountSchema.parse({ ...input, id: randomUUID() });
   delete account.draftConnection;
+  delete account.physicalIdentity;
   if (account.provider === 'postiz' && account.status === 'connected') { await verifyIntegration(account); account.verifiedAt = now(); }
   return mutateState(state => {
     if (state.accounts.some(existing => existing.provider === account.provider && existing.platform === account.platform && (account.provider === 'postiz' ? existing.integrationId === account.integrationId : existing.label === account.label))) throw new Error('This account already exists.');
@@ -174,7 +179,9 @@ export async function updateAccount(id: string, input: Omit<Account, 'id'>): Pro
     if (!sameTarget(existing, account) && state.jobs.some(job => job.accountId === id && ['submitting', 'needs_reconciliation'].includes(job.status))) throw new Error('Account target cannot change during an active or uncertain provider submission.');
     if (state.accounts.some(other => other.id !== id && other.provider === account.provider && other.platform === account.platform && (account.provider === 'postiz' ? other.integrationId === account.integrationId : other.label === account.label))) throw new Error('This account target already exists.');
     delete account.draftConnection;
+  delete account.physicalIdentity;
     if (existing.platform !== account.platform || existing.provider !== account.provider || existing.integrationId !== account.integrationId) delete existing.draftConnection;
+    if (existing.platform !== account.platform || existing.provider !== account.provider || existing.integrationId !== account.integrationId) delete existing.physicalIdentity;
     Object.assign(existing, account); return existing;
   });
 }
@@ -224,6 +231,7 @@ async function dispatchDue(): Promise<Job[]> {
   const results: Job[] = [...recovered];
   for (const id of ids) {
     activeSubmissions.add(id);
+    try { await withJobExecution(id, 'write', async () => {
     try {
       const claimed = await mutateState(async state => {
         const job = findJob(state, id);
@@ -241,14 +249,14 @@ async function dispatchDue(): Promise<Job[]> {
         job.attempts++; job.submissionOwner = owner; job.submissionStartedAt = now();
         return { job, account, variant, failed: false };
       });
-      if (!claimed) continue;
-      if (claimed.failed) { results.push(claimed.job); continue; }
+      if (!claimed) return;
+      if (claimed.failed) { results.push(claimed.job); return; }
       let integration: Integration;
       // This read-only preflight cannot create a remote post.
       try { integration = await verifyIntegration(claimed.account); }
       catch (error) {
         results.push(await mutateState(state => { const job = findJob(state, id); transition(job, 'failed', error instanceof Error ? error.message : 'Postiz connection verification failed.'); return job; }));
-        continue;
+        return;
       }
       const final = await mutateState(async state => {
         const job = findJob(state, id);
@@ -263,22 +271,23 @@ async function dispatchDue(): Promise<Job[]> {
         job.submissionStartedAt = now();
         return { job, account, variant };
       });
-      if (!final) { results.push(findJob(await readState(), id)); continue; }
+      if (!final) { results.push(findJob(await readState(), id)); return; }
       let remoteId: string;
       try { remoteId = await submitPostiz(final.job, final.account, final.variant, integration); }
       catch (error) {
         results.push(await mutateState(state => { const job = findJob(state, id); transition(job, error instanceof RejectedPublishError ? 'failed' : 'needs_reconciliation', error instanceof Error ? error.message : 'Provider outcome unknown.'); return job; }));
-        continue;
+        return;
       }
       // A persistence failure after POST leaves submitting in the durable state, so restart requires reconciliation.
       results.push(await mutateState(state => { const job = findJob(state, id); job.providerPostId = remoteId; transition(job, 'queued', 'Postiz accepted this job. Reconcile later for a platform publication URL.'); return job; }));
     } finally { activeSubmissions.delete(id); }
+    }); } finally { activeSubmissions.delete(id); }
   }
   return results;
 }
 export async function pausePublishing(paused: boolean): Promise<void> { await mutateState(state => { state.paused = paused; }); }
 
-const receiptHosts: Record<Platform, readonly string[]> = { xiaohongshu: ['xiaohongshu.com', 'xhslink.com'], reddit: ['reddit.com'], x: ['x.com', 'twitter.com'], wechat: ['mp.weixin.qq.com'], tiktok: ['tiktok.com'], bilibili: ['bilibili.com', 'b23.tv'], youtube: ['youtube.com', 'youtu.be'], kuaishou: ['kuaishou.com'], douyin: ['douyin.com'], instagram: ['instagram.com'], linkedin: ['linkedin.com'], facebook: ['facebook.com', 'fb.watch'], producthunt: ['producthunt.com'], zhihu: ['zhihu.com'] };
+const receiptHosts: Record<Platform, readonly string[]> = { xiaohongshu: ['xiaohongshu.com', 'xhslink.com'], reddit: ['reddit.com'], x: ['x.com', 'twitter.com'], wechat: ['mp.weixin.qq.com'], tiktok: ['tiktok.com'], bilibili: ['bilibili.com', 'b23.tv'], youtube: ['youtube.com', 'youtu.be'], kuaishou: ['kuaishou.com'], douyin: ['douyin.com'], instagram: ['instagram.com'], linkedin: ['linkedin.com'], facebook: ['facebook.com', 'fb.watch'], producthunt: ['producthunt.com'], zhihu: ['zhihu.com'], xueqiu: ['xueqiu.com'], gelonghui: ['gelonghui.com'], guba: ['guba.eastmoney.com'] };
 function receiptUrl(platform: Platform, remoteUrl: string): URL {
   const url = new URL(remoteUrl);
   if (url.protocol !== 'https:' || (url.port && url.port !== '443') || url.username || url.password || !receiptHosts[platform].some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) throw new Error('Publication URL must use HTTPS on the selected platform domain.');
@@ -298,6 +307,9 @@ export function extractPlatformId(platform: Platform, remoteUrl: string): string
       if (id && ['new', 'edit', 'draft'].includes(id.toLowerCase())) id = undefined;
       break;
     }
+    case 'xueqiu': id = /^\/\d+\/(\d+)\/?$/.exec(path)?.[1]; break;
+    case 'gelonghui': id = /^\/p\/(\d+)\/?$/.exec(path)?.[1]; break;
+    case 'guba': id = /^\/news,[a-zA-Z0-9]+,(\d+)\.html$/.exec(path)?.[1]; break;
     case 'zhihu': id = url.hostname === 'zhuanlan.zhihu.com' ? /^\/p\/(\d+)\/?$/.exec(path)?.[1] : /^\/question\/\d+\/answer\/(\d+)\/?$/.exec(path)?.[1]; break;
     case 'x': id = /^\/[^/]+\/status\/(\d+)(?:\/|$)/.exec(path)?.[1]; break;
     case 'reddit': id = /^\/(?:r\/[^/]+\/|user\/[^/]+\/)?comments\/([a-z0-9]+)(?:\/|$)/i.exec(path)?.[1]; break;
@@ -331,7 +343,7 @@ export function validateReceipt(platform: Platform, remoteUrl: string, remoteId:
   if (extractPlatformId(platform, remoteUrl) !== remoteId.trim()) throw new Error('The supplied platform post/video identifier does not match the published permalink.');
   return url.href;
 }
-export async function confirmPublication(jobId: string, remoteUrl: string, remoteId: string): Promise<Job> {
+async function confirmPublicationOwned(jobId: string, remoteUrl: string, remoteId: string): Promise<Job> {
   return mutateState(state => {
     const job = findJob(state, jobId);
     if (job.deliveryAction === 'save_draft') throw new Error('Use a draft receipt for this task. Public publication requires a separate reviewed action.');
@@ -349,7 +361,7 @@ export async function cancelJob(id: string): Promise<Job> {
     transition(job, 'cancelled', 'Local job cancelled before confirmed publication.'); return job;
   });
 }
-export async function reconcileJob(id: string): Promise<Job> {
+async function reconcileJobOwned(id: string): Promise<Job> {
   const state = await readState(); const job = findJob(state, id); const draft = job.snapshot?.draft ?? findDraft(state, requireArticleId(job)); const account = job.snapshot?.account ?? findAccount(state, job.accountId); const variant = job.snapshot?.variant ?? variantFor(draft, job.platform);
   if (job.deliveryAction === 'save_draft') throw new Error('Inspect the remote draft box and record a draft receipt. This task cannot be reconciled as a public post.');
   if (job.provider !== 'postiz' || !(['queued', 'needs_reconciliation'].includes(job.status) || (job.status === 'failed' && job.providerPostId))) throw new Error('This job needs a native publication receipt or is not ready for Postiz reconciliation.');
@@ -439,3 +451,7 @@ export async function retryFailedPublication(id: string): Promise<Job> {
     transition(job, 'scheduled', 'Retrying the same unfinished publication; no new job was created.'); job.scheduledAt = now(); return job;
   });
 }
+
+export async function reconcileJob(id: string): Promise<Job> { return withJobExecution(id, 'reconcile', () => reconcileJobOwned(id)); }
+
+export async function confirmPublication(jobId: string, remoteUrl: string, remoteId: string): Promise<Job> { return withJobExecution(jobId, 'reconcile', () => confirmPublicationOwned(jobId, remoteUrl, remoteId)); }

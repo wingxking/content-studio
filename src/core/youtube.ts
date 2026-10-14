@@ -1,3 +1,4 @@
+import { withJobExecution, markAccountDispatch, accountExecutionSignal } from './account-execution.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { open, stat } from 'node:fs/promises';
@@ -51,7 +52,7 @@ function liveSubmissionOwner(job: Job): boolean {
   catch (error) { return error instanceof Error && 'code' in error && error.code === 'EPERM'; }
 }
 async function call(url: string, init: RequestInit, io: ReturnType<typeof transport>): Promise<Response> {
-  try { return await io.fetcher(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${await io.tokenProvider()}` }, redirect: 'error', signal: AbortSignal.timeout(init.method === 'PUT' ? 120000 : 30000) }); }
+  try { return await io.fetcher(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${await io.tokenProvider()}` }, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(init.method === 'PUT' ? 120000 : 30000), ...accountExecutionSignal() ? [accountExecutionSignal()!] : []]) }); }
   catch { throw new Error('YouTube request failed; reconcile the saved upload before any new submission.'); }
 }
 async function parsed<T>(response: Response, schema: z.ZodType<T>): Promise<T> { try { return schema.parse(await response.json()); } catch { throw new Error('YouTube returned an invalid response; reconcile the saved upload.'); } }
@@ -142,7 +143,7 @@ function renewSubmissionLease(id: string, owner: string): { stop: () => void; as
   return { stop: () => clearInterval(timer), assert: () => { if (failure) throw failure; } };
 }
 // Explicit continuation only: probe the existing session, retain the same job/session, never insert another video.
-export async function resumeYouTubeJob(id: string, input: Transport = {}): Promise<Job> {
+async function resumeYouTubeJobOwned(id: string, input: Transport = {}): Promise<Job> {
   const journal = await loadJournal(id); if (!journal?.sessionUrl || journal.videoId) return reconcileYouTubeJob(id, input);
   const job = findJob(await readState(), id);
   if (!journalMatchesJob(job, journal) || liveSubmissionOwner(job)) throw new Error('Saved upload is mismatched or still owned.');
@@ -159,13 +160,14 @@ export async function resumeYouTubeJob(id: string, input: Transport = {}): Promi
   await mutateState(async state => { const current = findJob(state, id); if (jobFingerprint(current) !== jobFingerprint(job)) throw new Error('Job changed during recovery.'); await verifyCurrent(state, current); assertAccountAvailable(state, current); current.status = 'submitting'; current.submissionOwner = owner; current.submissionStartedAt = now(); current.submissionLeaseUntil = new Date(Date.now() + 180000).toISOString(); });
   const lease = renewSubmissionLease(id, owner);
   try {
+    await markAccountDispatch();
     journal.offset = confirmedOffset(probe, journal.mediaBytes); await saveJournal(journal);
     const result = await sendChunks(journal, path, io, async () => { lease.assert(); const state = await readState(); const current = findJob(state, id); if (state.paused || current.submissionOwner !== owner || current.status !== 'submitting') throw new Error('Upload ownership changed or publishing paused.'); });
     await mutateState(state => { const current = findJob(state, id); if (current.submissionOwner !== owner) throw new Error('Upload ownership changed.'); current.providerPostId = result.id; move(current, 'queued', 'Existing resumable upload completed; verifying remote receipt.'); });
     return reconcileYouTubeJob(id, io);
   } catch { await failUnknown(id, undefined, owner); throw new Error('Upload continuation requires reconciliation; existing session preserved.'); } finally { lease.stop(); }
 }
-export async function uploadYouTubeJob(id: string, settingsInput: Settings, input: Transport = {}): Promise<Job> {
+async function uploadYouTubeJobOwned(id: string, settingsInput: Settings, input: Transport = {}): Promise<Job> {
   const settings = youtubeSettingsSchema.parse(settingsInput);
   if (await loadJournal(id)) throw new Error('A durable YouTube upload journal already exists. Reconcile it; this command never starts a second upload.');
   const bundle = await exportJob(id);
@@ -196,6 +198,7 @@ export async function uploadYouTubeJob(id: string, settingsInput: Settings, inpu
   });
   const lease = renewSubmissionLease(id, owner);
   try {
+    await markAccountDispatch();
     await saveJournal(journal);
     const started = await call('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', { method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Length': String(info.size), 'X-Upload-Content-Type': 'video/mp4' }, body: JSON.stringify(journal.metadata) }, io);
     if (!started.ok) throw new Error(`YouTube session request returned HTTP ${started.status}.`);
@@ -216,7 +219,7 @@ export async function uploadYouTubeJob(id: string, settingsInput: Settings, inpu
     throw new Error('YouTube upload did not finish with verified publication. The job is preserved for reconciliation; no automatic retry was performed.');
   } finally { lease.stop(); }
 }
-export async function reconcileYouTubeJob(id: string, input: Transport = {}): Promise<Job> {
+async function reconcileYouTubeJobOwned(id: string, input: Transport = {}): Promise<Job> {
   const journal = await loadJournal(id); if (!journal) throw new Error('No saved YouTube upload journal exists for this job.');
   const initial = findJob(await readState(), id);
   if (!journalMatchesJob(initial, journal) || !['submitting', 'queued', 'needs_reconciliation', 'delivered', 'published'].includes(initial.status)) throw new Error('YouTube reconciliation does not match this job snapshot.');
@@ -246,4 +249,25 @@ export async function reconcileYouTubeJob(id: string, input: Transport = {}): Pr
     else move(job, 'queued', `YouTube video exists; API privacy is ${video.status.privacyStatus} and upload status is ${video.status.uploadStatus}. Public publication is not yet confirmed.`);
     return job;
   });
+}
+
+export async function uploadYouTubeJob(id: string, settingsInput: Settings, input: Transport = {}): Promise<Job> { return withJobExecution(id, 'write', () => uploadYouTubeJobOwned(id, settingsInput, input)); }
+
+export async function resumeYouTubeJob(id: string, input: Transport = {}): Promise<Job> { return withJobExecution(id, 'resume', () => resumeYouTubeJobOwned(id, input)); }
+
+export async function reconcileYouTubeJob(id: string, input: Transport = {}): Promise<Job> { return withJobExecution(id, 'reconcile', () => reconcileYouTubeJobOwned(id, input)); }
+
+export async function collectYouTubeJobMetrics(id: string, input: Transport = {}) {
+  const job = findJob(await readState(), id);
+  if (job.deliveryAction || !['published', 'delivered'].includes(job.status) || !job.remoteId || job.snapshot?.account.integrationId !== expectedYouTubeChannelId) throw new Error('A confirmed video for the intended channel is required.');
+  const io = await boundTransport(input); await verifyYouTubeChannel(io);
+  const response = await call(`https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${videoIdSchema.parse(job.remoteId)}`, { method: 'GET' }, io);
+  if (response.status === 429) { const error = new Error('The platform rate limit deferred metrics collection.'); Object.assign(error, { metricCode: 'RATE_LIMIT', retryAfter: response.headers.get('Retry-After') }); throw error; }
+  if ([401, 403].includes(response.status)) { const error = new Error('Renew the expected channel authorization before collecting metrics.'); Object.assign(error, { metricCode: 'AUTH_REQUIRED' }); throw error; }
+  if (!response.ok) throw new Error('The platform metrics request failed.');
+  const count = z.string().regex(/^\d+$/).transform(Number).refine(Number.isSafeInteger).optional();
+  const data = await parsed(response, z.object({ items: z.array(z.object({ id: videoIdSchema, snippet: z.object({ channelId: z.string() }), statistics: z.object({ viewCount: count, likeCount: count, commentCount: count }) })) }));
+  const item = data.items.find(value => value.id === job.remoteId && value.snippet.channelId === expectedYouTubeChannelId);
+  if (!item) throw new Error('The confirmed work is unavailable for the expected account.');
+  return { views: item.statistics.viewCount ?? null, likes: item.statistics.likeCount ?? null, comments: item.statistics.commentCount ?? null, shares: null, favorites: null, clicks: null, definition: 'YouTube Data API videos.statistics', adapterVersion: 'youtube-v1', source: 'official_api' as const };
 }

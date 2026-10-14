@@ -69,7 +69,7 @@ async function copyBackupTrees(sourceRoot, destination) {
 }
 export async function prepareDraftBridgeDirectory(bindRoot, uid, gid) {
   if (![uid, gid].every(value => Number.isInteger(value) && value >= 0)) throw new Error('Invalid Docker host UID/GID.');
-  for (const name of ['delivery-private', 'delivery-private/draft-bridge']) {
+  for (const name of ['delivery-private', 'delivery-private/draft-bridge', 'delivery-private/browser-publisher']) {
     const path = join(bindRoot, name);
     await mkdir(path, { recursive: true, mode: 0o700 });
     if (!(await lstat(path)).isDirectory()) throw new Error('Private bridge directory must not be a symbolic link.');
@@ -155,6 +155,11 @@ async function quiesceRestore() {
     update public.studio_task_runs set status=case when status in('queued','researching','generating') then 'failed' else status end,phase=case when status in('queued','researching','generating') then 'restore_interrupted' else phase end,error=case when status in('queued','researching','generating') then 'Restore interrupted active work; retry explicitly to resume preserved checkpoints.' else error end,lease_token=null,lease_expires_at=null,finished_at=coalesce(finished_at,now()),updated_at=now() where status in('queued','researching','generating') or lease_token is not null or lease_expires_at is not null;
     update public.studio_video_projects p set content=jsonb_set(jsonb_set(p.content,'{renders}',coalesce((select jsonb_agg(case when render->>'status'='running' then render || jsonb_build_object('status','failed','phase','Restore interrupted render; explicit retry required','error','Restore interrupted rendering; cached stages and checkpoints are preserved.','finishedAt',to_char(now() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'heartbeatAt',to_char(now() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) else render end order by position) from jsonb_array_elements(p.content->'renders') with ordinality entries(render,position)),'[]'::jsonb)),'{status}',to_jsonb(case when exists(select 1 from jsonb_array_elements(p.content->'renders') render where render->>'status'='succeeded' and render->>'revision'=p.content->>'revision') then 'ready'::text else 'editing'::text end)),updated_at=now() where p.content->>'status'='rendering' or exists(select 1 from jsonb_array_elements(p.content->'renders') render where render->>'status'='running');
     update public.content_studio_workspaces w set state=jsonb_set(w.state,'{jobs}',coalesce((select jsonb_agg(case when job->>'status'='submitting' then (job-'submissionOwner') || jsonb_build_object('submissionOwner',null,'status','needs_reconciliation','error','Restored upload ownership requires reconciliation; historical snapshot and journal are preserved.') else job end order by position) from jsonb_array_elements(w.state->'jobs') with ordinality entries(job,position)),'[]'::jsonb)),revision=revision+1,updated_at=now() where exists(select 1 from jsonb_array_elements(w.state->'jobs') job where job->>'status'='submitting');
+    do $$begin
+      if to_regclass('public.studio_account_execution_leases') is not null then execute 'update public.studio_account_execution_leases set owner_token=null,expires_at=now()';end if;
+      if to_regclass('public.studio_metric_polls') is not null then execute 'update public.studio_metric_polls set enabled=false,blocked_reason=''RESTORED_PAUSED''';end if;
+      if to_regclass('public.studio_metric_attempts') is not null then execute 'update public.studio_metric_attempts set status=''failed'',error=''RESTORE_INTERRUPTED'',finished_at=now() where status=''queued''';end if;
+    end $$;
     commit;`);
 }
 async function seedJournalMarkers(directory, ids) {
@@ -207,7 +212,7 @@ async function decryptFile(source, destination, key, name) {
   try { await pipeline(createReadStream(source,{start:28}),decipher,createWriteStream(destination,{flags:'wx',mode:0o600})); }
   catch (error) { await rm(destination,{force:true}); throw error; }
 }
-const privateBackupFile = key => /^(config|model-auth|model-cache|delivery-private)\//.test(key) || ['database.dump','roles.sql','graphql-functions.sql','pgmq-studio.json'].includes(key);
+const privateBackupFile = key => /^(config|model-auth|model-cache|delivery-private)\//.test(key) || ['database.dump','roles.sql','graphql-functions.sql','pgmq-studio.json'].includes(key) || /^data\/browser-journals\//.test(key);
 async function protectBackup(destination) {
   const keyPath=resolve(flag('--key-file')??join(root,'backup.key'));
   if(keyPath===destination || keyPath.startsWith(`${destination}${sep}`)) throw new Error('Encryption key must stay outside the backup folder.');
@@ -301,6 +306,16 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
     await writeFile(join(config,'images.lock.json'),JSON.stringify({builtAt:new Date().toISOString(),images},null,2),{mode:0o600});
     console.log('Application, model, renderer and TTS images built; immutable image identities recorded.');
   }
+  else if (action === 'browser-config') {
+    await prepareDraftBridgeDirectory(root,Number(process.env.STUDIO_HOST_UID ?? 1000),Number(process.env.STUDIO_HOST_GID ?? 1000));
+    const browserConfig=join(root,'delivery-private','browser-publisher','config.json');
+    if(!await stat(browserConfig).then(()=>true).catch(()=>false)) await privateFile(browserConfig,JSON.stringify({version:1,serviceKey:randomBytes(32).toString('base64url'),sessionId:randomUUID(),fixturesEnabled:args.includes('--fixtures'),fixtureScenario:'normal'}));
+    for(const name of ['browser-private/profiles','browser-private/state','data/browser-journals','browser-staging']) {const path=join(root,name);await mkdir(path,{recursive:true,mode:0o700});await chown(path,name==='browser-private/profiles'?1200:Number(process.env.STUDIO_HOST_UID??1000),name==='browser-private/profiles'?1200:Number(process.env.STUDIO_HOST_GID??1000));}
+    await chown(join(root,'delivery-private','browser-publisher'),Number(process.env.STUDIO_HOST_UID??1000),Number(process.env.STUDIO_HOST_GID??1000));await chown(browserConfig,Number(process.env.STUDIO_HOST_UID??1000),Number(process.env.STUDIO_HOST_GID??1000));
+    const env=await settings(); if(!env.STUDIO_BROWSER_VNC_PASSWORD) {env.STUDIO_BROWSER_VNC_PASSWORD=randomBytes(16).toString('base64url');await writeFile(join(config,'compose.env'),envText(env),{mode:0o600});}
+    console.log('Optional browser slot configured; live publishing stays disabled and credentials remain private.');
+  }
+  else if (action === 'browser-start') {await compose(['--profile','browser-publisher','build','browser-publisher'],{timeout:1800000});await compose(['--profile','browser-publisher','up','-d','--wait','browser','browser-publisher'],{timeout:600000});console.log('Optional browser services started.');}
   else if (action === 'database') { await compose(['up', '-d', '--wait', 'postgres', 'rest', 'auth', 'storage', 'mail', 'kong']); await pause(); console.log('Supabase Docker services started with publishing and scheduling paused.'); }
   else if (action === 'migrate') await migrate();
   else if (action === 'start') { const env = await settings(); await prepareDraftBridgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await compose(['up', '-d', '--wait']); console.log('All Docker services started.'); }
@@ -308,5 +323,5 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   else if (action === 'status') console.log(await compose(['ps', '--format', 'json']));
   else if (action === 'backup') await backup();
   else if (action === 'restore') await restore();
-  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|youtube-auth [--root folder]');
+  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|youtube-auth|browser-config|browser-start [--root folder]');
 } catch (error) { console.error(error instanceof Error ? error.message : 'Docker operation failed.'); process.exitCode = 1; }

@@ -1,3 +1,4 @@
+import { withJobExecution, markAccountDispatch, accountExecutionSignal, AccountExecutionBusyError }  from './account-execution.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import sharp from 'sharp';
@@ -114,12 +115,12 @@ export function parseNativeDraftReceipt(platform: Platform, value: unknown): Non
   if (!result || result.platform !== adapterPlatform(platform)) throw new Error('The adapter did not return a confirmed draft receipt. Inspect the platform draft box.');
   return { destination: 'platform', id: result.postId, url: safeDraftUrl(platform, result.postId, result.postUrl), verification: 'adapter_reported' };
 }
-export async function executeRemoteDraft(id: string, signal?: AbortSignal): Promise<Job> {
+async function executeRemoteDraftOwned(id: string, signal?: AbortSignal): Promise<Job> {
   const initial = getJob(await readState(), id);
   if (!['scheduled', 'failed'].includes(initial.status) || initial.attempts > 0) return initial;
   const owner = randomUUID(); let dispatched = false;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
-  const controller = new AbortController(); const activeSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const controller = new AbortController(); const signals = [signal, controller.signal, accountExecutionSignal()].filter((item): item is AbortSignal => Boolean(item)); const activeSignal = AbortSignal.any(signals);
   try {
     const snapshot = initial.snapshot!; const draft = snapshot.draft!;
     checkSnapshot(await readState(), initial);
@@ -139,7 +140,7 @@ export async function executeRemoteDraft(id: string, signal?: AbortSignal): Prom
     });
     if (!claimed) return getJob(await readState(), id);
     // Persist dispatch intent before calling either remote writer. Loss after this point is uncertain.
-    dispatched = true;
+    await markAccountDispatch(); dispatched = true;
     heartbeat = setInterval(() => { void mutateState(state => { const job = getJob(state, id); if (job.submissionOwner !== owner || job.status !== 'submitting') { controller.abort(); return; } job.submissionLeaseUntil = new Date(Date.now() + 15 * 60_000).toISOString(); }).catch(() => controller.abort()); }, 20_000);
     activeSignal.throwIfAborted();
     const receipt: NonNullable<Job['draftReceipt']> = integration
@@ -155,7 +156,7 @@ export async function executeRemoteDraft(id: string, signal?: AbortSignal): Prom
     });
   } finally { if (heartbeat) clearInterval(heartbeat); }
 }
-export async function confirmDraftReceipt(jobId: string, id: string, value: string): Promise<Job> {
+async function confirmDraftReceiptOwned(jobId: string, id: string, value: string): Promise<Job> {
   return mutateState(state => {
     const job = getJob(state, jobId);
     if (!['draft_saved', 'needs_reconciliation'].includes(job.status)) throw new Error('Only a saved or uncertain draft accepts draft verification.');
@@ -166,3 +167,14 @@ export async function confirmDraftReceipt(jobId: string, id: string, value: stri
     return transition(job, 'draft_saved', 'Operator verified the existing remote draft. No public publication was performed.');
   });
 }
+
+export async function executeRemoteDraft(id: string, signal?: AbortSignal): Promise<Job> {
+  const initial = getJob(await readState(), id); if (!['scheduled', 'failed'].includes(initial.status) || initial.attempts > 0) return initial;
+  try { return await withJobExecution(id, 'write', () => executeRemoteDraftOwned(id, signal)); }
+  catch (error) {
+    if (!(error instanceof AccountExecutionBusyError)) throw error;
+    return mutateState(state => { const job = getJob(state, id); if (['scheduled', 'failed'].includes(job.status) && job.attempts === 0) return transition(job, 'failed', 'The target account is busy or needs reconciliation. No draft request was sent.'); return job; });
+  }
+}
+
+export async function confirmDraftReceipt(jobId: string, id: string, value: string): Promise<Job> { return withJobExecution(jobId, 'reconcile', () => confirmDraftReceiptOwned(jobId, id, value)); }

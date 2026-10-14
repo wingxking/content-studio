@@ -1,3 +1,5 @@
+import { accountExecutionFence } from './account-execution.ts';
+import { dbRpc } from './database.ts';
 import { isTrustedDatabaseOrigin } from './database.ts';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -126,7 +128,8 @@ export async function mutateState<T>(fn: (state: StudioState) => T | Promise<T>)
     const row = await readDatabase();
     const result = await fn(row.state);
     const state = stateSchema.parse(row.state);
-    const response = await databaseRequest('PATCH', `?id=eq.${row.id}&revision=eq.${row.revision}`, { state, revision: row.revision + 1 });
+    const fence = accountExecutionFence();
+    const response = fence ? new Response(JSON.stringify(await dbRpc('studio_commit_account_workspace', { p_workspace: row.id, p_key: fence.key, p_token: fence.token, p_revision: row.revision, p_state: state })), { status: 200 }) : await databaseRequest('PATCH', `?id=eq.${row.id}&revision=eq.${row.revision}`, { state, revision: row.revision + 1 });
     if (!response.ok) throw new Error(`Supabase write failed (HTTP ${response.status}).`);
     const rows = z.array(rowSchema).parse(await response.json());
     if (rows.length === 1) return structuredClone(result);
