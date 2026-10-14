@@ -195,3 +195,8 @@ flowchart TD
 - 既有实现：[交付协调器](../src/core/delivery.ts)、[草稿生命周期](../src/core/remote-drafts.ts)、[连接与身份](../src/core/draft-connectors.ts)、[角色 worker](../src/server/worker.ts)、[图片适配](../src/core/article-tools.ts)、[资产登记](../src/core/assets.ts)、[Compose](../infra/compose.yml)。
 - BeeCMS 审查入口：`app/adapters/{base,xueqiu,gelonghui,guba}.py`、`app/services/{publisher,stats,imageutil,browser}.py`、`tools/browser.py`、`app/routers/api.py`。实施时重新读取，不能仅照本文复制选择器。
 - 上游可行性依据：[DrissionPage 浏览器地址/用户目录/仅接管配置](https://www.drissionpage.cn/browser_control/browser_options/)、[Selenium 官方容器及可视接管](https://github.com/SeleniumHQ/docker-selenium)。这些文档不证明本项目的两个组件已经互通；跨容器 CDP、固定依赖版本和架构兼容以 P3 实测为准。
+
+
+## 2026-10-14 product-loop implementation update
+
+The submitted BeeCMS plan was reviewed against `b6274cc` and extended through original code with an existing-instance setup checklist, immutable LocalFS text knowledge, default-off discovery-to-draft promotion, centralized activity and bounded accepted-publication readback. See [the current executed evidence](automation-knowledge-upgrade-2026-10-14.zh-CN.md), including Docker/SQL/Web/restore checks and remaining model/account/browser gates. Existing WechatSync/Postiz/YouTube routes and revision/account approvals remain in force; no private BeeCMS code or login state was copied.

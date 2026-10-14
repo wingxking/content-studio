@@ -17,6 +17,7 @@ export function taskFromQuestion(question: HotQuestion, snapshot: Task, sources:
     sources: selectedSources.length ? selectedSources : question.sourceUrls.map(url => ({ url, title: '', excerpt: '' })),
     kind: 'content',
     topicOrigin: 'trend',
+    discoveryAutomation: { enabled: false, maxDrafts: 1 },
     frequency: { type: 'once', time: '09:00', timezone },
     enabled: true,
   });

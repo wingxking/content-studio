@@ -10,6 +10,7 @@ import { loadRuntimeEnvironment } from '../core/runtime-env.ts';
 import { resolveAssetImagePaths } from '../core/assets.ts';
 import { handleStudioOperation } from '../core/editor.ts';
 import { runDueJobs } from '../core/pipeline.ts';
+import { runDuePublicationChecks } from '../core/publication-checks.ts';
 import { dataDirectory } from '../core/store.ts';
 import { configureTaskRuntime, getTaskRun, processTaskRun, taskRunOwnership, taskWorkspaceId } from '../core/tasks.ts';
 
@@ -19,7 +20,7 @@ export function registerWorkerHandler(type: string, handler: WorkerHandler): voi
   handlers.set(z.string().regex(/^[a-z][a-z0-9_]{0,49}$/u).parse(type), handler);
 }
 registerWorkerHandler('studio_operation', handleStudioOperation);
-registerWorkerHandler('legacy_publish', async (_id, signal) => { signal.throwIfAborted(); await runDueJobs(); });
+registerWorkerHandler('legacy_publish', async (_id, signal) => { signal.throwIfAborted(); await runDueJobs(); signal.throwIfAborted(); await runDuePublicationChecks(signal); });
 const claimSchema = z.object({ msgId: z.number().int().positive(), token: z.uuid(), message: z.object({ type: z.string(), id: z.uuid(), workspaceId: z.uuid() }) });
 export async function runWorkerOnce(parentSignal?: AbortSignal): Promise<boolean> {
   parentSignal?.throwIfAborted(); const workspace = await taskWorkspaceId();

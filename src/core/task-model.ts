@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { platformIds, platformSchema, sourceSchema, variantSchema } from './model.ts';
+import { knowledgeIdsSchema } from './knowledge-model.ts';
 
 export const taskSourceSchema = z.object({
   title: z.string().max(300).default(''),
@@ -26,12 +27,14 @@ export const taskInputSchema = z.object({
   platforms: z.array(platformSchema).min(1).max(platformIds.length).refine(values => new Set(values).size === values.length, 'Platforms must be unique'),
   sources: z.array(taskSourceSchema).max(20).default([]),
   assetIds: z.array(z.uuid()).max(12).default([]),
+  knowledgeIds: knowledgeIdsSchema.default([]),
+  discoveryAutomation: z.object({ enabled: z.boolean().default(false), maxDrafts: z.number().int().min(1).max(3).default(1) }).default({ enabled: false, maxDrafts: 1 }),
   kind: z.enum(['content', 'discovery']),
   topicOrigin: z.enum(['editorial', 'trend']).default('trend'),
   frequency: taskFrequencySchema,
   enabled: z.boolean(),
-});
-export const taskSchema = taskInputSchema.extend({
+}).superRefine((value, context) => { if (value.kind === 'content' && value.discoveryAutomation.enabled) context.addIssue({ code: 'custom', path: ['discoveryAutomation', 'enabled'], message: 'Content tasks cannot enable discovery automation.' }); });
+export const taskSchema = taskInputSchema.safeExtend({
   id: z.uuid(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), nextRunAt: z.iso.datetime().nullable(),
 });
 export type TaskInput = z.infer<typeof taskInputSchema>;

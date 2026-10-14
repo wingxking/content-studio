@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { prepareDraftBridgeDirectory, youtubeAuthorizationNotice } from '../scripts/docker.mjs';
+import { prepareDraftBridgeDirectory, prepareKnowledgeDirectory, validateKnowledgeSource, youtubeAuthorizationNotice } from '../scripts/docker.mjs';
 const execute = promisify(execFile);
 test('Docker lifecycle wrapper deduplicates default backup targets and shared source roots', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'studio-wrapper-'));
@@ -18,6 +18,7 @@ test('Docker lifecycle wrapper deduplicates default backup targets and shared so
     for (const args of [
       ['backup', '--root', root, '--target', join(backups, 'cutover')],
       ['youtube-auth', '--root', root, '--client-file', client, '--callback-port', '18765'],
+      ['knowledge-config', '--root', root, '--knowledge-source', binary],
       ['restore', '--root', root, '--source', root, '--data-source', root],
       ['restore', '--root', root, '--source', backups, '--data-source', backups],
     ]) {
@@ -26,10 +27,27 @@ test('Docker lifecycle wrapper deduplicates default backup targets and shared so
       const destinations = mounts.map(value => value.split(',').find(part => part.startsWith('dst='))?.slice(4));
       assert.equal(destinations.length, new Set(destinations).size);
       if (args[0] === 'youtube-auth') assert.ok(mounts.includes(`type=bind,src=${client},dst=${client},readonly`));
+      if (args[0] === 'knowledge-config') assert.ok(mounts.includes(`type=bind,src=${binary},dst=${binary},readonly`));
       assert.ok(mounts.includes(`type=bind,src=${root},dst=${root}`));
       assert.ok(mounts.includes(`type=bind,src=${backups},dst=${backups}`));
       assert.deepEqual(values.slice(values.indexOf('content-studio-operations:local') + 1), args);
     }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('Knowledge mounts preserve private input and reject symlink and bind separator escapes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'studio-knowledge-mount-'));
+  try {
+    await prepareKnowledgeDirectory(directory, process.getuid?.() ?? 1000, process.getgid?.() ?? 1000);
+    const inbox = join(directory, 'knowledge-inbox');
+    await writeFile(join(inbox, 'guide.md'), 'retained');
+    assert.equal(await validateKnowledgeSource(inbox), inbox);
+    await prepareKnowledgeDirectory(directory, process.getuid?.() ?? 1000, process.getgid?.() ?? 1000);
+    assert.equal(await readFile(join(inbox, 'guide.md'), 'utf8'), 'retained');
+    const alias = join(directory, 'alias'); await symlink(inbox, alias);
+    for (const value of [alias, '/', `${inbox}:rw`, `${inbox},readonly`]) await assert.rejects(validateKnowledgeSource(value));
+    await rm(inbox, { recursive: true }); await symlink(directory, inbox);
+    await assert.rejects(prepareKnowledgeDirectory(directory, process.getuid?.() ?? 1000, process.getgid?.() ?? 1000), /symbolic link/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

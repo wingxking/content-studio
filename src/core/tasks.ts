@@ -12,6 +12,8 @@ import { assertAvailableModel } from './models.ts';
 import { adaptMaster, generateMaster, runStructuredGeneration, type GenerationOptions } from './generation-engine.ts';
 import { researchSources } from './research.ts';
 import { hotQuestionSchema, taskInputSchema, taskRunSchema, taskSchema, type Task, type TaskInput, type TaskRun } from './task-model.ts';
+import { knowledgeStore } from './knowledge.ts';
+import { repairDiscoveryPromotions } from './discovery-automation.ts';
 
 export async function taskWorkspaceId(): Promise<string> {
   await loadRuntimeEnvironment();
@@ -46,6 +48,7 @@ export async function getTask(id: string): Promise<Task> {
 }
 async function saveTask(id: string, value: TaskInput): Promise<Task> {
   const input = taskInputSchema.parse(value); await assertAvailableModel(input.model);
+  for (const sourceId of input.knowledgeIds) await knowledgeStore().get(sourceId);
   input.sources = input.sources.filter(source => source.url.trim() || source.title.trim() || source.excerpt.trim());
   return taskFromRow(await dbRpc('studio_save_task', { p_workspace: await taskWorkspaceId(), p_id: id, p_config: input }));
 }
@@ -93,7 +96,8 @@ async function exportsFor(run: TaskRun): Promise<TaskRun['outputPaths']> {
   const directory = join(dataDirectory(), 'runs', run.id); await mkdir(directory, { recursive: true, mode: 0o700 });
   const master = run.master ? `# ${run.master.title}\n\n${run.master.body}\n` : `# ${run.taskSnapshot.title}\n\n${run.questions.map((item, index) => `${index + 1}. ${item.question}\n   ${item.sourceUrls.join(' ')}`).join('\n\n')}\n`;
   await writeFile(join(directory, 'master.md'), master, { mode: 0o600 });
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ ...run, guidanceVersion: CONTENT_GUIDANCE_VERSION }, null, 2), { mode: 0o600 });
+  const knowledge = run.taskSnapshot.knowledgeIds.length ? { ref: run.id, sources: (await knowledgeStore().readSnapshot(run.id, run.taskSnapshot.knowledgeIds)).map(({ excerpt: _excerpt, start, end, ...source }) => ({ ...source, start, end })) } : null;
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ ...run, knowledge, guidanceVersion: CONTENT_GUIDANCE_VERSION }, null, 2), { mode: 0o600 });
   const platforms: Record<string, string> = {};
   for (const variant of run.variants) {
     const filename = `${variant.platform}.md`; platforms[variant.platform] = filename;
@@ -120,7 +124,7 @@ export async function processTaskRun(id: string, token: string, signal: AbortSig
   if (!claimed || !rowSchema.parse(claimed).id) {
     const current = await getTaskRun(id);
     if (['researching', 'generating', 'queued'].includes(current.status)) throw new Error('Task run has an active lease; queue delivery will retry.');
-    if (current.status === 'succeeded') await exportsFor(current);
+    if (current.status === 'succeeded') { await exportsFor(current); await repairDiscoveryPromotions(current, workspace); }
     return;
   }
   let run = runFromRow(claimed);
@@ -133,8 +137,9 @@ export async function processTaskRun(id: string, token: string, signal: AbortSig
   try {
     const task = run.taskSnapshot; const imagePaths = await runtime.resolveImagePaths(task.assetIds);
     if (imagePaths.length !== task.assetIds.length) throw new Error('Every selected reference image must resolve successfully.');
-    const options: GenerationOptions = { model: task.model, imagePaths, signal };
-    if (!run.sources.length) {
+    const knowledge = task.knowledgeIds.length ? await knowledgeStore().snapshot(run.id, task.knowledgeIds, `${task.prompt}\n${task.angle}`) : [];
+    const options: GenerationOptions = { model: task.model, imagePaths, knowledge, signal };
+    if (!run.sources.length && (!knowledge.length || task.sources.length || task.kind === 'discovery')) {
       await patch({ phase: 'researching', progress: 5 });
       const research = await runtime.research(task, { ...options, onProgress: async event => { await patch({ phase: event.phase, progress: 10 }); } });
       await patch({ sources: research.sources, warnings: research.warnings, phase: 'sources_saved', progress: 25 });
@@ -152,10 +157,10 @@ export async function processTaskRun(id: string, token: string, signal: AbortSig
         await patch({ questions: result.questions, phase: 'questions_saved', progress: 90 });
       }
       const outputPaths = await exportsFor(run); await patch({ status: 'succeeded', phase: 'completed', progress: 100, outputPaths });
-      await exportsFor(run); return;
+      await exportsFor(run); await repairDiscoveryPromotions(run, workspace); return;
     }
-    if (!run.sources.length) throw new Error('No verified readable sources were collected; supply a source URL or excerpt and retry.');
-    const brief: Brief = briefSchema.parse({ topicOrigin: task.topicOrigin, topic: task.title, audience: task.audience || 'Readers seeking useful and evidence-backed information', angle: task.angle || task.prompt.slice(0, 4000), sources: run.sources, platforms: task.platforms });
+    if (!run.sources.length && !knowledge.length) throw new Error('No readable evidence was collected; supply source evidence or select immutable knowledge and retry.');
+    const brief: Brief = briefSchema.parse({ topicOrigin: task.topicOrigin, topic: task.title, audience: task.audience || 'Readers seeking useful and evidence-backed information', angle: task.angle || task.prompt.slice(0, 4000), sources: run.sources, ...(knowledge.length ? { knowledgeIds: task.knowledgeIds } : {}), platforms: task.platforms });
     if (!run.master) {
       await patch({ status: 'generating', phase: 'generating_master', progress: 35 });
       const master = await runtime.generateMaster(brief, task.prompt, options);
@@ -172,7 +177,7 @@ export async function processTaskRun(id: string, token: string, signal: AbortSig
       await patch({ outputPaths: await exportsFor(run) });
     }
     signal.throwIfAborted(); await patch({ phase: 'saving_draft', progress: 95 });
-    const draft = await createDraft(brief, { ...master, variants: run.variants }, run.id, task.model, { instruction: task.prompt, assetIds: task.assetIds });
+    const draft = await createDraft(brief, { ...master, variants: run.variants }, run.id, task.model, { instruction: task.prompt, assetIds: task.assetIds, ...(knowledge.length ? { knowledgeRef: run.id } : {}) });
     await patch({ draftId: draft.id }); const outputPaths = await exportsFor(run);
     await patch({ status: 'succeeded', phase: 'completed', progress: 100, outputPaths });
     await exportsFor(run);

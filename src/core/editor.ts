@@ -12,6 +12,7 @@ import { buildMedia } from './media.ts';
 import { draftSchema, generatedSchema, platformSchema, variantSchema, type Draft, type Generated, type Platform, type Variant } from './model.ts';
 import { assessmentSchema } from './task-model.ts';
 import { resolveGenerationContext } from './generation-context.ts';
+import { knowledgeStore } from './knowledge.ts';
 
 const now = (): string => new Date().toISOString();
 const workspace = (): string => z.uuid().parse(process.env.STUDIO_WORKSPACE_ID);
@@ -85,7 +86,7 @@ export async function createOperation(draftId: string, kind: Operation['kind'], 
   if (input.expectedRevision !== undefined && input.expectedRevision !== draft.revision) throw new Error('Draft revision changed. Refresh before starting.');
   const context = ['sync', 'refine'].includes(kind) ? await resolveGenerationContext(draft) : null;
   const model = typeof input.model === 'string' ? input.model : draft.generationModel ?? context?.model;
-  const inherited = context ? { generationInstruction: context.instruction, assetIds: input.assetIds === undefined ? context.assetIds : z.array(z.uuid()).max(12).parse(input.assetIds) } : {};
+  const inherited = context ? { generationInstruction: context.instruction, assetIds: input.assetIds === undefined ? context.assetIds : z.array(z.uuid()).max(12).parse(input.assetIds), ...(context.knowledgeRef ? { generationKnowledgeRef: context.knowledgeRef } : {}) } : {};
   const id = randomUUID();
   const createdId = z.uuid().parse(await dbRpc('studio_create_operation', { p_workspace: workspace(), p_id: id, p_draft: draftId, p_kind: kind, p_input: { ...input, ...inherited, ...(model ? { model } : {}), expectedRevision: draft.revision } }));
   return getOperation(createdId);
@@ -264,7 +265,10 @@ export async function handleStudioOperation(id: string, parentSignal: AbortSigna
     const context = ['sync', 'refine'].includes(operation.kind) && (input.generationInstruction === undefined || input.assetIds === undefined) ? await resolveGenerationContext(draft) : null;
     const model = typeof input.model === 'string' ? input.model : draft.generationModel ?? context?.model;
     const instruction = z.string().max(12000).parse(input.generationInstruction ?? context?.instruction ?? '');
-    const options = { ...(model ? { model } : {}), imagePaths: await resolveAssetImagePaths(z.array(z.uuid()).max(12).parse(input.assetIds ?? context?.assetIds ?? [])), signal, onProgress: async (event: { phase: string; message: string }) => patch({ phase: event.message }) };
+    const knowledgeRef = draft.generationKnowledgeRef ?? context?.knowledgeRef ?? input.generationKnowledgeRef;
+    if (draft.brief.knowledgeIds?.length && !knowledgeRef) throw new Error('This draft is missing its original knowledge snapshot reference; restore its generation context before editing.');
+    const knowledge = knowledgeRef ? await knowledgeStore().readSnapshot(z.uuid().parse(knowledgeRef), draft.brief.knowledgeIds) : [];
+    const options = { ...(model ? { model } : {}), knowledge, imagePaths: await resolveAssetImagePaths(z.array(z.uuid()).max(12).parse(input.assetIds ?? context?.assetIds ?? [])), signal, onProgress: async (event: { phase: string; message: string }) => patch({ phase: event.message }) };
     let output: unknown;
     if (operation.kind === 'refine') {
       const scope = z.union([z.literal('master'), platformSchema]).parse(input.scope); const prompt = z.string().min(3).max(4000).parse(input.prompt);

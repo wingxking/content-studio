@@ -13,7 +13,8 @@ import { Router } from 'express';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { listAssets, resolveAssetPath } from '../core/assets.ts';
-import { createTask, updateTask, listTasks, getTask, enqueueTaskRun, listTaskRuns, getTaskRun, cancelTaskRun, retryTaskRun, readRunArtifact } from '../core/tasks.ts';
+import { createTask, updateTask, listTasks, getTask, enqueueTaskRun, listTaskRuns, getTaskRun, cancelTaskRun, retryTaskRun, readRunArtifact, taskWorkspaceId } from '../core/tasks.ts';
+import { listDiscoveryPromotions, repairDiscoveryPromotions } from '../core/discovery-automation.ts';
 import { readPrivateJson } from '../core/youtube-oauth.ts';
 import { dataDirectory } from '../core/store.ts';
 import { listModels } from '../core/models.ts';
@@ -43,6 +44,12 @@ studioApi.put('/tasks/:id', async (req, res) => res.json(await updateTask(id(req
 studioApi.post('/tasks/:id/run', async (req, res) => res.json(await enqueueTaskRun(id(req.params.id), { manual: true })));
 studioApi.get('/tasks/:id/runs', async (req, res) => res.json(await listTaskRuns(id(req.params.id))));
 studioApi.get('/runs', async (_req, res) => res.json(await listTaskRuns()));
+studioApi.get('/runs/:id/promotions', async (req, res) => res.json(await listDiscoveryPromotions(await taskWorkspaceId(), id(req.params.id))));
+studioApi.post('/runs/:id/promotions/repair', async (req, res) => {
+  const run = await getTaskRun(id(req.params.id));
+  if (run.status !== 'succeeded' || run.taskSnapshot.kind !== 'discovery' || !run.taskSnapshot.discoveryAutomation.enabled) throw new Error('Only a completed discovery with automatic production enabled can repair its child tasks.');
+  res.json(await repairDiscoveryPromotions(run, await taskWorkspaceId()));
+});
 studioApi.get('/runs/:id', async (req, res) => res.json(await getTaskRun(id(req.params.id))));
 studioApi.post('/runs/:id/cancel', async (req, res) => res.json(await cancelTaskRun(id(req.params.id))));
 studioApi.post('/runs/:id/retry', async (req, res) => res.json(await retryTaskRun(id(req.params.id))));

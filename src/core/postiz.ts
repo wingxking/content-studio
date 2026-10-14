@@ -19,9 +19,9 @@ function config(): { base: string; key: string } {
   if (url.username || url.password || url.search || url.hash) throw new Error('Postiz base URL cannot contain credentials, query, or fragment.');
   return { base: url.href.replace(/\/$/, ''), key };
 }
-async function request(path: string, method = 'GET', body?: unknown): Promise<Response> {
+async function request(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<Response> {
   const { base, key } = config();
-  return fetch(`${base}${path}`, { method, headers: { Authorization: key, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.any([AbortSignal.timeout(30000), ...accountExecutionSignal() ? [accountExecutionSignal()!] : []]), redirect: 'error' });
+  return fetch(`${base}${path}`, { method, headers: { Authorization: key, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.any([AbortSignal.timeout(30000), ...signal ? [signal] : [], ...accountExecutionSignal() ? [accountExecutionSignal()!] : []]), redirect: 'error' });
 }
 export async function listIntegrations(): Promise<Integration[]> {
   const response = await request('/integrations');
@@ -76,10 +76,10 @@ export async function savePostizDraft(job: Job, account: Account, variant: Varia
   // The receipt identifies a Postiz draft, not a native platform draft or a published post.
   return createPostizPost(job, account, variant, integration, 'draft');
 }
-export async function listRemotePosts(job: Job): Promise<RemotePost[]> {
+export async function listRemotePosts(job: Job, signal?: AbortSignal): Promise<RemotePost[]> {
   const day = 86400000;
   const query = new URLSearchParams({ startDate: new Date(Date.parse(job.submissionStartedAt ?? job.scheduledAt) - day).toISOString(), endDate: new Date(Math.max(Date.now(), Date.parse(job.submissionStartedAt ?? job.scheduledAt)) + day).toISOString() });
-  const response = await request(`/posts?${query}`);
+  const response = await request(`/posts?${query}`, 'GET', undefined, signal);
   if (!response.ok) throw new Error(`Postiz reconciliation unavailable (HTTP ${response.status}).`);
   return z.object({ posts: z.array(remotePostSchema) }).parse(await response.json()).posts;
 }

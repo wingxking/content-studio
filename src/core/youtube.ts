@@ -10,6 +10,7 @@ import { type Job, type StudioState } from './model.ts';
 import { exportJob, verifyDraftApproval } from './pipeline.ts';
 import { resolveMediaLocation } from './media-location.ts';
 import { dataDirectory, mutateState, readState } from './store.ts';
+import { createVerificationCheck } from './publication-checks.ts';
 import { desktopYouTubeTokenProvider, readPrivateJson, writePrivateJson } from './youtube-oauth.ts';
 
 export const expectedYouTubeChannelId = 'UCVUtH6reLkEuMrUuTh-XgjQ';
@@ -18,19 +19,19 @@ type Settings = z.infer<typeof youtubeSettingsSchema>;
 const videoIdSchema = z.string().regex(/^[\w-]{11}$/);
 const journalSchema = z.object({ version: z.literal(1), jobId: z.uuid(), channelId: z.literal(expectedYouTubeChannelId), approvedHash: z.string(), mediaHash: z.string(), mediaBytes: z.number().int().positive(), offset: z.number().int().nonnegative().default(0), metadata: z.object({ snippet: z.object({ title: z.string(), description: z.string(), tags: z.array(z.string()), categoryId: z.string(), defaultLanguage: z.string() }), status: youtubeSettingsSchema.omit({ categoryId: true, defaultLanguage: true, descriptionDisclosure: true }) }), phase: z.enum(['starting', 'session_ready', 'sending', 'uploaded', 'needs_reconciliation']), sessionUrl: z.string().nullable(), videoId: videoIdSchema.nullable(), at: z.iso.datetime() });
 type Journal = z.infer<typeof journalSchema>;
-type Transport = { fetcher?: typeof fetch; tokenProvider?: () => Promise<string> };
+type Transport = { fetcher?: typeof fetch; tokenProvider?: () => Promise<string>; signal?: AbortSignal; readOnly?: boolean };
 const now = (): string => new Date().toISOString();
 const privateRoot = (): string => join(dataDirectory(), 'youtube');
 const journalPath = (jobId: string): string => join(privateRoot(), 'uploads', `${z.uuid().parse(jobId)}.json`);
 const findJob = (state: StudioState, id: string): Job => { const job = state.jobs.find(item => item.id === id); if (!job) throw new Error('Job not found.'); return job; };
-function move(job: Job, status: Job['status'], message: string): void { job.status = status; job.error = status === 'needs_reconciliation' || status === 'failed' ? message : null; job.submissionOwner = null; job.submissionLeaseUntil = null; job.history.push({ at: now(), status, message }); }
-function transport(input: Transport): { fetcher: typeof fetch; tokenProvider: () => Promise<string> } { const fetcher = input.fetcher ?? fetch; return { fetcher, tokenProvider: input.tokenProvider ?? desktopYouTubeTokenProvider(join(privateRoot(), 'secrets'), fetcher) }; }
+function move(job: Job, status: Job['status'], message: string): void { if (job.verificationCheck && ['published', 'failed', 'cancelled', 'needs_reconciliation'].includes(status)) { job.verificationCheck.nextAt = null; job.verificationCheck.stoppedReason = status === 'needs_reconciliation' ? 'uncertain' : 'terminal'; } job.status = status; job.error = status === 'needs_reconciliation' || status === 'failed' ? message : null; job.submissionOwner = null; job.submissionLeaseUntil = null; job.history.push({ at: now(), status, message }); }
+function transport(input: Transport): { fetcher: typeof fetch; tokenProvider: () => Promise<string>; signal?: AbortSignal } { const original = input.fetcher ?? fetch; const fetcher: typeof fetch = input.signal ? (url, init) => original(url, { ...init, signal: AbortSignal.any([input.signal!, ...init?.signal ? [init.signal] : []]) }) : original; return { fetcher, tokenProvider: input.tokenProvider ?? desktopYouTubeTokenProvider(join(privateRoot(), 'secrets'), fetcher), signal: input.signal }; }
 async function boundTransport(input: Transport): Promise<ReturnType<typeof transport>> {
   const io = transport(input);
   let bearer: string;
   try { bearer = await io.tokenProvider(); }
   catch { throw new Error('YouTube authorization is unavailable; authorize the expected channel before uploading or reconciling.'); }
-  return { fetcher: io.fetcher, tokenProvider: async () => bearer };
+  return { fetcher: io.fetcher, tokenProvider: async () => bearer, signal: io.signal };
 }
 function journalMatchesJob(job: Job, journal: Journal): boolean {
   return job.id === journal.jobId && job.platform === 'youtube' && job.provider === 'native' && job.approvedHash === journal.approvedHash
@@ -52,7 +53,7 @@ function liveSubmissionOwner(job: Job): boolean {
   catch (error) { return error instanceof Error && 'code' in error && error.code === 'EPERM'; }
 }
 async function call(url: string, init: RequestInit, io: ReturnType<typeof transport>): Promise<Response> {
-  try { return await io.fetcher(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${await io.tokenProvider()}` }, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(init.method === 'PUT' ? 120000 : 30000), ...accountExecutionSignal() ? [accountExecutionSignal()!] : []]) }); }
+  try { return await io.fetcher(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${await io.tokenProvider()}` }, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(init.method === 'PUT' ? 120000 : 30000), ...io.signal ? [io.signal] : [], ...accountExecutionSignal() ? [accountExecutionSignal()!] : []]) }); }
   catch { throw new Error('YouTube request failed; reconcile the saved upload before any new submission.'); }
 }
 async function parsed<T>(response: Response, schema: z.ZodType<T>): Promise<T> { try { return schema.parse(await response.json()); } catch { throw new Error('YouTube returned an invalid response; reconcile the saved upload.'); } }
@@ -82,6 +83,21 @@ async function failUnknown(id: string, expectedFingerprint?: string, submissionO
     move(job, 'needs_reconciliation', 'YouTube outcome is uncertain. Reconcile the saved session/video; the historical receipt is preserved and no new upload is authorized.');
     return job;
   });
+}
+async function readAcceptedUpload(id: string, input: Transport): Promise<Job> {
+  try { return await reconcileYouTubeJob(id, { ...input, readOnly: true }); }
+  catch (error) {
+    return mutateState(state => {
+      const job = findJob(state, id);
+      if (!job.remoteId || !['queued', 'delivered'].includes(job.status) || !job.verificationCheck) throw error;
+      const permission = error instanceof Error && /HTTP\s*(?:401|403)|auth|permission|different.*channel|ambiguous.*channel/iu.test(error.message);
+      job.verificationCheck.attempt++; job.verificationCheck.checkedAt = now();
+      job.verificationCheck.lastError = permission ? '授权或目标账号需要复核，自动核验已停止。' : '首次远端查询暂不可用，已受理的视频保留，等待只读核验。';
+      job.verificationCheck.nextAt = permission ? null : new Date(Date.now() + 120_000).toISOString();
+      job.verificationCheck.stoppedReason = permission ? 'permission_required' : null;
+      return job;
+    });
+  }
 }
 async function verifyCurrent(state: StudioState, job: Job): Promise<void> {
   if (state.paused) throw new Error('Publishing is paused.');
@@ -149,7 +165,16 @@ async function resumeYouTubeJobOwned(id: string, input: Transport = {}): Promise
   if (!journalMatchesJob(job, journal) || liveSubmissionOwner(job)) throw new Error('Saved upload is mismatched or still owned.');
   const io = await boundTransport(input); await verifyYouTubeChannel(io);
   const probe = await call(validatedSession(journal.sessionUrl), { method: 'PUT', headers: { 'Content-Length': '0', 'Content-Range': `bytes */${journal.mediaBytes}` } }, io);
-  if ([200, 201].includes(probe.status)) { journal.videoId = (await parsed(probe, z.object({ id: videoIdSchema }))).id; journal.phase = 'uploaded'; await saveJournal(journal); return reconcileYouTubeJob(id, io); }
+  if ([200, 201].includes(probe.status)) {
+    journal.videoId = (await parsed(probe, z.object({ id: videoIdSchema }))).id; journal.phase = 'uploaded'; await saveJournal(journal);
+    await mutateState(state => {
+      const current = findJob(state, id);
+      if (jobFingerprint(current) !== jobFingerprint(job) || !journalMatchesJob(current, journal) || !['submitting', 'queued', 'needs_reconciliation', 'delivered'].includes(current.status)) throw new Error('Completed upload recovery changed; inspect the saved video before continuing.');
+      current.providerPostId = journal.videoId; current.remoteId = journal.videoId; current.verificationCheck ??= createVerificationCheck();
+      move(current, 'queued', 'Existing upload session returned its completed video ID; verifying the original video.');
+    });
+    return readAcceptedUpload(id, io);
+  }
   if (probe.status !== 308) return failUnknown(id);
   const bundle = await exportJob(id);
   await verifyCurrent(await readState(), bundle.job);
@@ -163,8 +188,8 @@ async function resumeYouTubeJobOwned(id: string, input: Transport = {}): Promise
     await markAccountDispatch();
     journal.offset = confirmedOffset(probe, journal.mediaBytes); await saveJournal(journal);
     const result = await sendChunks(journal, path, io, async () => { lease.assert(); const state = await readState(); const current = findJob(state, id); if (state.paused || current.submissionOwner !== owner || current.status !== 'submitting') throw new Error('Upload ownership changed or publishing paused.'); });
-    await mutateState(state => { const current = findJob(state, id); if (current.submissionOwner !== owner) throw new Error('Upload ownership changed.'); current.providerPostId = result.id; move(current, 'queued', 'Existing resumable upload completed; verifying remote receipt.'); });
-    return reconcileYouTubeJob(id, io);
+    await mutateState(state => { const current = findJob(state, id); if (current.submissionOwner !== owner) throw new Error('Upload ownership changed.'); current.providerPostId = result.id; current.remoteId = result.id; current.verificationCheck = createVerificationCheck(); move(current, 'queued', 'Existing resumable upload completed; verifying remote receipt.'); });
+    return readAcceptedUpload(id, io);
   } catch { await failUnknown(id, undefined, owner); throw new Error('Upload continuation requires reconciliation; existing session preserved.'); } finally { lease.stop(); }
 }
 async function uploadYouTubeJobOwned(id: string, settingsInput: Settings, input: Transport = {}): Promise<Job> {
@@ -210,9 +235,9 @@ async function uploadYouTubeJobOwned(id: string, settingsInput: Settings, input:
     await mutateState(state => {
       const job = findJob(state, id);
       if (job.status !== 'submitting' || job.submissionOwner !== owner || !journalMatchesJob(job, journal)) throw new Error('YouTube submission ownership or snapshot changed after media upload; reconcile the saved video.');
-      job.providerPostId = reply.id; move(job, 'queued', 'YouTube returned a video ID; processing and public visibility are not yet verified.');
+      job.providerPostId = reply.id; job.remoteId = reply.id; job.verificationCheck = createVerificationCheck(); move(job, 'queued', 'YouTube returned a video ID; processing and public visibility are not yet verified.');
     });
-    return reconcileYouTubeJob(id, io);
+    return readAcceptedUpload(id, io);
   } catch {
     // Never issue another session POST, even when the first response was lost.
     await failUnknown(id, undefined, owner);
@@ -222,19 +247,21 @@ async function uploadYouTubeJobOwned(id: string, settingsInput: Settings, input:
 async function reconcileYouTubeJobOwned(id: string, input: Transport = {}): Promise<Job> {
   const journal = await loadJournal(id); if (!journal) throw new Error('No saved YouTube upload journal exists for this job.');
   const initial = findJob(await readState(), id);
+  if (input.readOnly && (initial.deliveryAction || !initial.remoteId || journal.videoId !== initial.remoteId || !['queued', 'delivered'].includes(initial.status))) throw new Error('Automatic readback requires a confirmed video identifier and matching saved journal.');
   if (!journalMatchesJob(initial, journal) || !['submitting', 'queued', 'needs_reconciliation', 'delivered', 'published'].includes(initial.status)) throw new Error('YouTube reconciliation does not match this job snapshot.');
   if (liveSubmissionOwner(initial)) throw new Error('The YouTube submission owner is still running; wait for it to finish before reconciliation.');
   const fingerprint = jobFingerprint(initial);
   const io = await boundTransport(input);
   await verifyYouTubeChannel(io);
   if (!journal.videoId && journal.sessionUrl) {
+    if (input.readOnly) throw new Error('Automatic readback never probes or resumes an upload session.');
     const probed = await call(validatedSession(journal.sessionUrl), { method: 'PUT', headers: { 'Content-Length': '0', 'Content-Range': `bytes */${journal.mediaBytes}` } }, io);
     if ([200, 201].includes(probed.status)) { const reply = await parsed(probed, z.object({ id: videoIdSchema })); journal.videoId = reply.id; journal.phase = 'uploaded'; await saveJournal(journal); }
     else return failUnknown(id, fingerprint);
   }
   if (!journal.videoId) return failUnknown(id, fingerprint);
   const response = await call(`https://www.googleapis.com/youtube/v3/videos?part=snippet,status,processingDetails&id=${journal.videoId}`, { method: 'GET' }, io);
-  if (!response.ok) return failUnknown(id, fingerprint);
+  if (!response.ok) { if (input.readOnly) throw new Error(`YouTube readback unavailable (HTTP ${response.status}).`); return failUnknown(id, fingerprint); }
   const reply = await parsed(response, z.object({ items: z.array(z.object({ id: videoIdSchema, snippet: z.object({ channelId: z.string() }), status: z.object({ privacyStatus: z.enum(['public', 'unlisted', 'private']), uploadStatus: z.enum(['uploaded', 'processed', 'failed', 'rejected', 'deleted']) }), processingDetails: z.object({ processingStatus: z.enum(['processing', 'succeeded', 'failed', 'terminated']) }).optional() })) }));
   const video = reply.items[0];
   if (reply.items.length !== 1 || !video || video.id !== journal.videoId || video.snippet.channelId !== expectedYouTubeChannelId) return failUnknown(id, fingerprint);

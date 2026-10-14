@@ -7,6 +7,7 @@ STUDIO_SOURCE_MOUNT=
 STUDIO_KEY_MOUNT=
 STUDIO_CLIENT_MOUNT=
 STUDIO_DATA_SOURCE_MOUNT=
+STUDIO_KNOWLEDGE_SOURCE_MOUNT=
 STUDIO_TARGET_PARENT=
 previous=
 for argument in "$@"; do
@@ -16,6 +17,7 @@ for argument in "$@"; do
     --key-file) STUDIO_KEY_MOUNT=$argument ;;
     --client-file) STUDIO_CLIENT_MOUNT=$argument ;;
     --data-source) STUDIO_DATA_SOURCE_MOUNT=$argument ;;
+    --knowledge-source) STUDIO_KNOWLEDGE_SOURCE_MOUNT=$argument ;;
     --target) STUDIO_TARGET_PARENT=$(dirname -- "$argument") ;;
   esac
   previous=$argument
@@ -34,6 +36,9 @@ fi
 if [ -n "$STUDIO_DATA_SOURCE_MOUNT" ]; then
   STUDIO_DATA_SOURCE_MOUNT=$(CDPATH= cd -- "$STUDIO_DATA_SOURCE_MOUNT" && pwd)
 fi
+if [ -n "$STUDIO_KNOWLEDGE_SOURCE_MOUNT" ]; then
+  STUDIO_KNOWLEDGE_SOURCE_MOUNT=$(CDPATH= cd -- "$STUDIO_KNOWLEDGE_SOURCE_MOUNT" && pwd)
+fi
 if [ -n "$STUDIO_KEY_MOUNT" ]; then
   STUDIO_KEY_MOUNT=$(CDPATH= cd -- "$(dirname -- "$STUDIO_KEY_MOUNT")" && pwd)/$(basename -- "$STUDIO_KEY_MOUNT")
 fi
@@ -43,7 +48,7 @@ fi
 # Writable lifecycle destinations take priority; each exact destination is mounted once.
 set -- content-studio-operations:local "$@"
 STUDIO_MOUNT_DESTINATIONS='|'
-for STUDIO_MOUNT_ENTRY in "rw:$STUDIO_BIND_ROOT" "rw:$STUDIO_BACKUP_ROOT" "rw:$STUDIO_TARGET_PARENT" "ro:$STUDIO_PROJECT_DIR" "ro:$STUDIO_SOURCE_MOUNT" "ro:$STUDIO_DATA_SOURCE_MOUNT" "ro:$STUDIO_KEY_MOUNT" "ro:$STUDIO_CLIENT_MOUNT"; do
+for STUDIO_MOUNT_ENTRY in "rw:$STUDIO_BIND_ROOT" "rw:$STUDIO_BACKUP_ROOT" "rw:$STUDIO_TARGET_PARENT" "ro:$STUDIO_PROJECT_DIR" "ro:$STUDIO_SOURCE_MOUNT" "ro:$STUDIO_DATA_SOURCE_MOUNT" "ro:$STUDIO_KEY_MOUNT" "ro:$STUDIO_CLIENT_MOUNT" "ro:$STUDIO_KNOWLEDGE_SOURCE_MOUNT"; do
   STUDIO_MOUNT_MODE=${STUDIO_MOUNT_ENTRY%%:*}
   STUDIO_MOUNT_PATH=${STUDIO_MOUNT_ENTRY#*:}
   [ -n "$STUDIO_MOUNT_PATH" ] || continue

@@ -13,6 +13,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { accountSchema, briefSchema, draftSchema, generatedSchema, metricsInputSchema, nativeUrls, type Account, type Brief, type Draft, type Generated, type Job, type Platform, type StudioState, type Variant } from './model.ts';
 import { dataDirectory, mutateState, readState, storageMode } from './store.ts';
+import { createVerificationCheck } from './publication-checks.ts';
 import { dbRpc } from './database.ts';
 import { isManagedMediaPath, resolveMediaLocation } from './media-location.ts';
 import { writeDraftArtifacts } from './artifacts.ts';
@@ -48,6 +49,7 @@ function variantFor(draft: Draft, platform: Platform): Variant {
   return variant;
 }
 function transition(job: Job, status: Job['status'], message: string): void {
+  if (job.verificationCheck && ['published', 'failed', 'cancelled', 'needs_reconciliation', 'draft_saved'].includes(status)) { job.verificationCheck.nextAt = null; job.verificationCheck.stoppedReason = status === 'needs_reconciliation' ? 'uncertain' : 'terminal'; }
   job.status = status;
   job.error = ['failed', 'needs_reconciliation'].includes(status) ? message : null;
   job.history.push({ at: now(), status, message });
@@ -112,10 +114,11 @@ async function verifyApproval(draft: Draft, variant: Variant, account: Account, 
   if (job && job.approvedHash !== targetHash(draft, variant, account)) throw new Error('Approved content revision or account target changed. Cancel this job and schedule the reviewed revision.');
 }
 
-export async function createDraft(briefInput: Brief, generatedInput: Generated, stableId?: string, generationModel?: string, generationContext?: { instruction: string; assetIds: string[] }): Promise<Draft> {
+export async function createDraft(briefInput: Brief, generatedInput: Generated, stableId?: string, generationModel?: string, generationContext?: { instruction: string; assetIds: string[]; knowledgeRef?: string }): Promise<Draft> {
   const brief = briefSchema.parse(briefInput);
+  if (brief.knowledgeIds?.length && !generationContext?.knowledgeRef) throw new Error('Knowledge-backed drafts require their original immutable generation snapshot.');
   const generated = canonicalArticle(validGenerated(brief, generatedInput));
-  const draft: Draft = { ...generated, id: stableId ? z.uuid().parse(stableId) : randomUUID(), brief, createdAt: now(), revision: 1, approvedHash: null, ...(generationModel !== undefined ? { generationModel: draftSchema.shape.generationModel.parse(generationModel) } : {}), ...(generationContext ? { generationInstruction: draftSchema.shape.generationInstruction.parse(generationContext.instruction), generationAssetIds: draftSchema.shape.generationAssetIds.parse(generationContext.assetIds) } : {}) };
+  const draft: Draft = { ...generated, id: stableId ? z.uuid().parse(stableId) : randomUUID(), brief, createdAt: now(), revision: 1, approvedHash: null, ...(generationModel !== undefined ? { generationModel: draftSchema.shape.generationModel.parse(generationModel) } : {}), ...(generationContext ? { generationInstruction: draftSchema.shape.generationInstruction.parse(generationContext.instruction), generationAssetIds: draftSchema.shape.generationAssetIds.parse(generationContext.assetIds), ...(generationContext.knowledgeRef ? { generationKnowledgeRef: z.uuid().parse(generationContext.knowledgeRef) } : {}) } : {}) };
   const result = await mutateState(state => { const existing = state.drafts.find(item => item.id === draft.id); if (existing) return existing; state.drafts.push(draft); return draft; });
   await writeDraftArtifacts(result);
   return result;
@@ -279,7 +282,7 @@ async function dispatchDue(): Promise<Job[]> {
         return;
       }
       // A persistence failure after POST leaves submitting in the durable state, so restart requires reconciliation.
-      results.push(await mutateState(state => { const job = findJob(state, id); job.providerPostId = remoteId; transition(job, 'queued', 'Postiz accepted this job. Reconcile later for a platform publication URL.'); return job; }));
+      results.push(await mutateState(state => { const job = findJob(state, id); job.providerPostId = remoteId; job.verificationCheck = createVerificationCheck(); transition(job, 'queued', 'Postiz accepted this job. Read-only verification will check its platform publication URL while publishing is enabled.'); return job; }));
     } finally { activeSubmissions.delete(id); }
     }); } finally { activeSubmissions.delete(id); }
   }
@@ -361,12 +364,12 @@ export async function cancelJob(id: string): Promise<Job> {
     transition(job, 'cancelled', 'Local job cancelled before confirmed publication.'); return job;
   });
 }
-async function reconcileJobOwned(id: string): Promise<Job> {
+async function reconcileJobOwned(id: string, signal?: AbortSignal): Promise<Job> {
   const state = await readState(); const job = findJob(state, id); const draft = job.snapshot?.draft ?? findDraft(state, requireArticleId(job)); const account = job.snapshot?.account ?? findAccount(state, job.accountId); const variant = job.snapshot?.variant ?? variantFor(draft, job.platform);
   if (job.deliveryAction === 'save_draft') throw new Error('Inspect the remote draft box and record a draft receipt. This task cannot be reconciled as a public post.');
   if (job.provider !== 'postiz' || !(['queued', 'needs_reconciliation'].includes(job.status) || (job.status === 'failed' && job.providerPostId))) throw new Error('This job needs a native publication receipt or is not ready for Postiz reconciliation.');
   if (!job.providerPostId && job.approvedHash !== targetHash(draft, variant, account)) throw new Error('Content or target changed after the unknown submission. Inspect the provider and record its exact publication receipt.');
-  const posts = await listRemotePosts(job);
+  const posts = await listRemotePosts(job, signal);
   const matches = posts.filter(post => post.integration.id === account.integrationId && (job.providerPostId ? post.id === job.providerPostId : post.content === canonicalPostizContent(variant) && Math.abs(Date.parse(post.publishDate) - Date.parse(job.submissionStartedAt ?? job.scheduledAt)) <= 60000));
   return mutateState(current => {
     const currentJob = findJob(current, id);
@@ -452,6 +455,6 @@ export async function retryFailedPublication(id: string): Promise<Job> {
   });
 }
 
-export async function reconcileJob(id: string): Promise<Job> { return withJobExecution(id, 'reconcile', () => reconcileJobOwned(id)); }
+export async function reconcileJob(id: string, options: { signal?: AbortSignal } = {}): Promise<Job> { return withJobExecution(id, 'reconcile', () => reconcileJobOwned(id, options.signal)); }
 
 export async function confirmPublication(jobId: string, remoteUrl: string, remoteId: string): Promise<Job> { return withJobExecution(jobId, 'reconcile', () => confirmPublicationOwned(jobId, remoteUrl, remoteId)); }

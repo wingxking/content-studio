@@ -1,5 +1,5 @@
 import { accountExecutionFence } from './account-execution.ts';
-import { dbRpc } from './database.ts';
+import { dbRpc, databaseRequestSignal } from './database.ts';
 import { isTrustedDatabaseOrigin } from './database.ts';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -95,7 +95,7 @@ async function databaseRequest(method: string, query: string, body?: unknown): P
   const config = databaseConfig();
   const headers: Record<string, string> = { apikey: config.key, 'Content-Type': 'application/json', Prefer: 'return=representation' };
   if (config.key.startsWith('eyJ')) headers.Authorization = `Bearer ${config.key}`;
-  try { return await fetch(`${config.url}${query}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000), redirect: 'error' }); }
+  try { return await fetch(`${config.url}${query}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.any([AbortSignal.timeout(15000), ...databaseRequestSignal() ? [databaseRequestSignal()!] : []]), redirect: 'error' }); }
   catch { throw new Error('Supabase request failed; verify network and workspace configuration.'); }
 }
 async function readDatabase(): Promise<Row> {

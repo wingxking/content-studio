@@ -11,6 +11,60 @@ import { authorizeDesktopYouTube, desktopYouTubeTokenProvider, readPrivateJson, 
 import { collectYouTubeJobMetrics, expectedYouTubeChannelId, reconcileYouTubeJob, resumeYouTubeJob, uploadYouTubeJob, verifyYouTubeChannel } from '../src/core/youtube.ts';
 
 const videoId = 'AbCdeF123_-';
+test('completed same-session continuation arms read-only polling after transient first readback', async () => {
+  const data = await fixture(); let inserts = 0; let probes = 0;
+  try {
+    await assert.rejects(uploadYouTubeJob(data.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => {
+      if (url.pathname.endsWith('/channels')) return json({ items: [{ id: expectedYouTubeChannelId }] });
+      if (init.method === 'POST') { inserts++; return new Response(null, { headers: { Location: session } }); }
+      throw new Error('Lost binary upload acknowledgement');
+    }) }), /preserved for reconciliation/);
+    const queued = await resumeYouTubeJob(data.id, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => {
+      if (url.pathname.endsWith('/channels')) return json({ items: [{ id: expectedYouTubeChannelId }] });
+      if (init.method === 'PUT') { probes++; assert.equal(new Headers(init.headers).get('Content-Length'), '0'); return json({ id: videoId }, 201); }
+      assert.equal(init.method, 'GET'); return json({}, 503);
+    }) });
+    assert.equal(queued.status, 'queued'); assert.equal(queued.remoteId, videoId); assert.ok(queued.verificationCheck?.nextAt); assert.equal(queued.attempts, 1); assert.equal(inserts, 1); assert.equal(probes, 1);
+    const published = await reconcileYouTubeJob(data.id, { readOnly: true, tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => { assert.equal(init.method, 'GET'); return url.pathname.endsWith('/channels') ? json({ items: [{ id: expectedYouTubeChannelId }] }) : readback(); }) });
+    assert.equal(published.status, 'published'); assert.equal(published.attempts, 1); assert.equal(published.verificationCheck?.nextAt, null);
+  } finally { await data.cleanup(); }
+});
+test('an acknowledged video ID survives transient first readback for automatic polling', async () => {
+  const data = await fixture(); let uploads = 0; let binaryUploads = 0;
+  try {
+    const queued = await uploadYouTubeJob(data.id, settings, { tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => {
+      if (url.pathname.endsWith('/channels')) return json({ items: [{ id: expectedYouTubeChannelId }] });
+      if (init.method === 'POST') { uploads++; return new Response(null, { headers: { Location: session } }); }
+      if (init.method === 'PUT') { binaryUploads++; return json({ id: videoId }, 201); }
+      return json({}, 503);
+    }) });
+    assert.equal(queued.status, 'queued'); assert.equal(queued.remoteId, videoId); assert.ok(queued.verificationCheck?.nextAt); assert.equal(queued.verificationCheck?.attempt, 1);
+    const result = await reconcileYouTubeJob(data.id, { readOnly: true, tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => { assert.equal(init.method, 'GET'); return url.pathname.endsWith('/channels') ? json({ items: [{ id: expectedYouTubeChannelId }] }) : readback(); }) });
+    assert.equal(result.status, 'published'); assert.equal(result.verificationCheck?.nextAt, null); assert.equal(uploads, 1); assert.equal(binaryUploads, 1); assert.equal(result.attempts, 1);
+  } finally { await data.cleanup(); }
+});
+test('automatic YouTube readback uses GET only and never probes or resubmits an upload', async () => {
+  const data = await fixture();
+  try {
+    const delivered = await uploadYouTubeJob(data.id, { ...settings, privacyStatus: 'private' }, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch('private') });
+    assert.equal(delivered.status, 'delivered'); assert.equal(delivered.remoteId, videoId); assert.ok(delivered.verificationCheck?.nextAt);
+    const reads: string[] = [];
+    const published = await reconcileYouTubeJob(data.id, { readOnly: true, tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => { assert.equal(init.method, 'GET'); reads.push(url.pathname); return url.pathname.endsWith('/channels') ? json({ items: [{ id: expectedYouTubeChannelId }] }) : readback(); }) });
+    assert.equal(reads.length, 2); assert.equal(published.status, 'published'); assert.equal(published.attempts, 1); assert.equal(published.verificationCheck?.nextAt, null);
+    await mutateState(state => { const job = state.jobs[0]!; job.status = 'queued'; job.remoteId = null; });
+    let externalReads = 0;
+    await assert.rejects(reconcileYouTubeJob(data.id, { readOnly: true, tokenProvider: async () => 'fixture-token', fetcher: mockFetch(() => { externalReads++; return readback(); }) }), /confirmed video identifier/);
+    assert.equal(externalReads, 0);
+  } finally { await data.cleanup(); }
+});
+test('automatic YouTube readback surfaces permission errors without losing accepted state', async () => {
+  const data = await fixture();
+  try {
+    await uploadYouTubeJob(data.id, { ...settings, privacyStatus: 'private' }, { tokenProvider: async () => 'fixture-token', fetcher: successfulUploadFetch('private') });
+    await assert.rejects(reconcileYouTubeJob(data.id, { readOnly: true, tokenProvider: async () => 'fixture-token', fetcher: mockFetch((url, init) => { assert.equal(init.method, 'GET'); return url.pathname.endsWith('/channels') ? json({ items: [{ id: expectedYouTubeChannelId }] }) : json({}, 403); }) }), /HTTP 403/);
+    const retained = (await readState()).jobs[0]!; assert.equal(retained.status, 'delivered'); assert.equal(retained.remoteId, videoId); assert.equal(retained.attempts, 1);
+  } finally { await data.cleanup(); }
+});
 const session = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=fixture';
 const settings = { privacyStatus: 'public' as const, selfDeclaredMadeForKids: false, containsSyntheticMedia: true, categoryId: '27', defaultLanguage: 'en', descriptionDisclosure: 'AI-assisted writing, original explanatory cards, and generic synthetic narration.' };
 const json = (body: unknown, status = 200, headers: HeadersInit = {}): Response => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });

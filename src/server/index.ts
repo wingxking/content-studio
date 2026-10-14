@@ -22,6 +22,8 @@ import { isManagedMediaPath, resolveMediaLocation } from '../core/media-location
 import { studioApi } from './studio-api.ts';
 import { draftConnectorApi } from './draft-api.ts';
 import { draftBridgeStatus } from '../core/draft-connectors.ts';
+import { knowledgeApi } from './knowledge-api.ts';
+import { runtimeApi } from './runtime-api.ts';
 
 await loadRuntimeEnvironment();
 
@@ -42,6 +44,8 @@ app.use(createStreamingAssetRouter());
 app.use(express.json({ limit: '2mb', strict: true }));
 app.use('/api', studioApi);
 app.use('/api', draftConnectorApi);
+app.use('/api/knowledge', knowledgeApi);
+app.use('/api', runtimeApi);
 app.get('/healthz', (_req, res) => res.json({ ready: true }));
 app.get('/api/status', async (_req, res) => res.json({ state: await readState(), readiness: await doctor() }));
 app.post('/api/drafts/import', async (req, res) => { const input = z.object({ brief: briefSchema, content: generatedSchema }).parse(req.body); res.json(await createDraft(input.brief, input.content)); });
@@ -92,7 +96,7 @@ app.get('/api/media', async (req, res) => {
   res.setHeader('Content-Disposition', `inline; filename="${basename(path).replace(/[^\w.-]/g, '_')}"`); res.sendFile(path, { dotfiles: 'allow' });
 });
 app.get('/api/docs/:name', async (req, res) => {
-  const name = z.enum(['publishing-ecosystem-2026-10-13.zh-CN', 'research', 'accounts', 'architecture', 'acceptance', 'web-product-design.zh-CN', 'web-technical-architecture.zh-CN', 'research-web-workflows-2026-10-10.zh-CN', 'local-system-delivery.zh-CN', 'publishing-capabilities-upgrade-2026-10-11.zh-CN', 'publishing-competitors-and-codex-browser-2026-10-11']).parse(req.params.name);
+  const name = z.enum(['docker-runtime', 'local-knowledge-library', 'automation-knowledge-upgrade-2026-10-14.zh-CN', 'publishing-ecosystem-2026-10-13.zh-CN', 'research', 'accounts', 'architecture', 'acceptance', 'web-product-design.zh-CN', 'web-technical-architecture.zh-CN', 'research-web-workflows-2026-10-10.zh-CN', 'local-system-delivery.zh-CN', 'publishing-capabilities-upgrade-2026-10-11.zh-CN', 'publishing-competitors-and-codex-browser-2026-10-11']).parse(req.params.name);
   res.type('text/markdown').send(await readFile(resolve('docs', `${name}.md`), 'utf8'));
 });
 const errors: ErrorRequestHandler = (error: unknown, _req, res, _next) => {

@@ -74,3 +74,28 @@ The upstream extension reports a draft ID/URL but has no read-draft or idempoten
 The final application build passed strict TypeScript and 251 tests. The Docker-only lifecycle wrapper built the application/model/renderer/TTS images, recorded image identities, and produced the encrypted pre-upgrade backup `2026-10-13-before-draft-upgrade` with 1009 verified files. All 14 services subsequently ran with configured health checks passing. The original workspace retained five accounts and six jobs with publishing paused.
 
 `tests/draft-docker-smoke.ts`, run inside a one-off application container, created its own Supabase workspace and exercised actual HTTP routes, queue RPCs, delivery worker execution and the gateway using a fake extension. Three draft receipts persisted, repeated requests created no extra writes, and no public post existed. This is transport/workflow acceptance, not real-platform acceptance. The actual companion remains unpaired; Chrome installation, native account draft checks and idle connection stability remain pending.
+
+## Knowledge sources and guided setup: 2026-10-14
+
+The local Web entry now opens the existing-instance setup checklist and offers a knowledge library and activity monitor. A clean first-machine installer or native desktop client is still not supplied. Application workers continue using Supabase/pgmq/pg_cron; the API does not receive the Docker socket.
+
+By default `<bind-root>/knowledge-inbox` is a private host directory mounted **read-only** as `/knowledge-import` in the API container. Imported UTF-8 TXT/MD/JSON/CSV files become bounded, hash-verified immutable snapshots under `data/media/localfs/knowledge`; they do not remain dependent on the source directory. Original media keeps its existing LocalFS authority. Use the Web upload control or explicitly select mounted files to import.
+
+To choose a reviewed external source folder, use the Docker-only lifecycle and then select files in Web:
+
+```sh
+sh scripts/docker.sh knowledge-config --root /absolute/private-root --knowledge-source /absolute/reviewed-knowledge
+sh scripts/docker.sh start --root /absolute/private-root
+```
+
+The source must be an existing real absolute directory without symlinks or bind-mount separators. This command does not import everything automatically. The wrapper mounts the selected input read-only even for lifecycle validation. Restore clears the previous machine's `STUDIO_KNOWLEDGE_SOURCE`; imported objects/manifests/run snapshots travel with `data`. The original external folder is not backed up by Studio. Place a new source directory on the destination or use its new default inbox.
+
+Container model login now has a portable wrapper that does not require host Node/Codex:
+
+```sh
+sh scripts/docker.sh model-login --root /absolute/private-root
+```
+
+Complete the fresh official device authorization yourself, then refresh the model catalog and run an actual task. Do not retain device codes, auth files or raw model logs in Git. Full source/build/queue/account evidence is recorded in [the ecosystem upgrade](automation-knowledge-upgrade-2026-10-14.zh-CN.md); detailed bounds and evidence semantics are in [local knowledge](local-knowledge-library.md).
+
+Migration 017 reuses the existing dispatcher and delivery-role tick for bounded readback of **new accepted API** publications. It creates no additional cron, performs no automatic resubmission, ignores historical/unknown/draft jobs, and remains inactive while the workspace is paused. Verification metadata is operational state; platform ID/URL and processed/public readback remain the publication evidence.

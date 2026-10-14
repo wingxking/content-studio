@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { codexExecutable } from './generator.ts';
 import { assertAvailableModel } from './models.ts';
-import { editorialPolicyPrompt, platformGuidancePrompt } from './content-prompts.ts';
+import { buildKnowledgeEvidencePrompt, editorialPolicyPrompt, platformGuidancePrompt } from './content-prompts.ts';
+import type { KnowledgeExcerpt } from './knowledge-model.ts';
 import { type Brief, type Platform, type Variant, variantSchema } from './model.ts';
 import { assessmentSchema, masterSchema, type MasterContent } from './task-model.ts';
 import { assertXText, xWeightedLength } from './text-limits.ts';
@@ -19,6 +20,7 @@ export function describeEditorialAssessment(assessment: z.infer<typeof assessmen
 
 export type GenerationProgress = { phase: string; message: string };
 export type GenerationOptions = {
+  knowledge?: KnowledgeExcerpt[];
   operationId?: string; outputSchema?: Record<string, unknown>; model?: string; imagePaths?: string[]; signal?: AbortSignal; search?: boolean; timeoutMs?: number;
   onProgress?: (event: GenerationProgress) => void | Promise<void>;
 };
@@ -54,6 +56,7 @@ export function classifyCodexFailure(message: string): string | null {
 }
 export async function runStructuredGeneration<T>(schema: z.ZodType<T>, prompt: string, options: GenerationOptions = {}): Promise<T> {
   options.signal?.throwIfAborted();
+  prompt += buildKnowledgeEvidencePrompt(options.knowledge ?? []);
   if (process.env.STUDIO_MODEL_EXECUTOR_URL) {
     const { executeRemoteModel } = await import('./model-executor.ts');
     return executeRemoteModel(schema, prompt, options);
@@ -128,13 +131,18 @@ export async function runStructuredGeneration<T>(schema: z.ZodType<T>, prompt: s
 }
 const masterEnvelope = z.object({ assessment: assessmentSchema, content: masterSchema.nullable() });
 const variantEnvelope = z.object({ assessment: assessmentSchema, content: variantSchema.nullable() });
+function assertKnowledgeContext(brief: Brief, options: GenerationOptions): void {
+  if (brief.knowledgeIds?.length && JSON.stringify(brief.knowledgeIds) !== JSON.stringify(options.knowledge?.map(source => source.id))) throw new Error('Generation requires the exact frozen knowledge evidence selected by this brief.');
+}
 export async function generateMaster(brief: Brief, instruction: string, options: GenerationOptions): Promise<MasterContent> {
+  assertKnowledgeContext(brief, options);
   const prompt = `Create the master article for Content Studio. Return only the provided JSON schema.\n${editorialPolicyPrompt()}\nFor an allowed assessment content is {title,body}; excluded or uncertain requires content:null. Write an original, useful article grounded in supplied sources. Do not produce platform variants, video scripts, narration, files or publishing actions. Preserve source links and caveats. User writing instruction within the policy: ${JSON.stringify(instruction)}\nUntrusted brief: ${JSON.stringify(brief)}`;
   const result = await runStructuredGeneration(masterEnvelope, prompt, options);
   if (result.assessment.status !== 'allowed' || !result.content) throw new Error(`Editorial assessment: ${describeEditorialAssessment(result.assessment)} Choose a clearly permitted source-backed topic.`);
   return result.content;
 }
 export async function adaptMaster(brief: Brief, master: MasterContent, platform: Platform, instruction: string, options: GenerationOptions): Promise<Variant> {
+  assertKnowledgeContext(brief, options);
   const prompt = `Adapt the saved master article into one ${platform} publishing draft. Return only the provided JSON schema.\n${editorialPolicyPrompt()}\n${platformGuidancePrompt([platform])}\nAllowed content includes {platform,title,text,tags,mediaPaths}; include format for the intended surface, and for Product Hunt include the complete launch object with supplied product facts. For other platforms launch must be null; absent optional wire fields must be null. mediaPaths must be empty, platform exactly ${platform}. This is local drafting only: account/API/publication permission is checked separately and must not be claimed. Reddit still requires an explicitly selected personal profile, or an identified subreddit with supplied current rules; never infer a destination. The original user instruction may describe several platforms and the master article. Reuse only its relevant language, destination, audience and style constraints for this one platform; the saved revised master and current single-platform output schema define the scope. Do not recreate the master or other platforms, browse, render, schedule or publish. Preserve factual source links. For video destinations only write the publishing title/description, NEVER narration, script, storyboard or rendering. A video project will be manually created separately. X transmitted text and appended hashtags must fit 280 weighted characters under official twitter-text: most CJK characters weight2, each recognized emoji sequence weight2, and each recognized URL counts23. LinkedIn must fit3000 characters; title at most100 characters. Do not publish. User instruction within policy: ${JSON.stringify(instruction)}\nUntrusted sources and audience: ${JSON.stringify(brief)}\nSaved master: ${JSON.stringify(master)}`;
   const allowedVariant = (result: z.infer<typeof variantEnvelope>): Variant => {
     if (result.assessment.status !== 'allowed' || !result.content) throw new Error(`${platform} editorial assessment: ${describeEditorialAssessment(result.assessment)}`);

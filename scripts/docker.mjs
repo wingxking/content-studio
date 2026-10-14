@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
-import { chmod, chown, cp, lstat, mkdir, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, chown, cp, lstat, mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -94,6 +94,19 @@ export async function prepareDraftBridgeDirectory(bindRoot, uid, gid) {
     if (!(await lstat(path)).isDirectory()) throw new Error('Private bridge directory must not be a symbolic link.');
     await chown(path, uid, gid); await chmod(path, 0o700);
   }
+}
+export async function prepareKnowledgeDirectory(bindRoot, uid, gid) {
+  if (![uid, gid].every(value => Number.isInteger(value) && value >= 0)) throw new Error('Invalid Docker host UID/GID.');
+  const directory = join(bindRoot, 'knowledge-inbox');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (!(await lstat(directory)).isDirectory()) throw new Error('Knowledge inbox must not be a symbolic link.');
+  await chown(directory, uid, gid); await chmod(directory, 0o700);
+}
+export async function validateKnowledgeSource(value) {
+  if (typeof value !== 'string' || !value.startsWith('/') || /[\r\n:,]/.test(value)) throw new Error('Choose an absolute knowledge directory without bind-mount separators.');
+  const path = resolve(value);
+  if (path === '/' || !(await lstat(path)).isDirectory() || await realpath(path) !== path) throw new Error('Knowledge source must be an existing real directory, without symbolic links.');
+  return path;
 }
 async function writeBackupDestination(destination, writer) {
   await mkdir(dirname(destination),{recursive:true,mode:0o700});
@@ -285,6 +298,8 @@ async function restore() {
   await seedJournalMarkers(join(root,'data/publication-journals'),manifest.journalIds??[]);
   const env = await settings(); env.STUDIO_DOCKER_ROOT = root; env.STUDIO_COMPOSE_PROJECT = flag('--project') ?? `content-studio-restore-${randomUUID().slice(0, 8)}`; env.STUDIO_UID = process.env.STUDIO_HOST_UID ?? process.getuid?.() ?? 1000; env.STUDIO_GID = process.env.STUDIO_HOST_GID ?? process.getgid?.() ?? 1000; env.STUDIO_WEB_PORT = Number(flag('--port') ?? 15310); env.STUDIO_SUPABASE_PORT = Number(flag('--supabase-port') ?? 57421); env.STUDIO_DATABASE_PORT = Number(flag('--database-port') ?? 57422);
   env.STUDIO_DRAFT_BRIDGE_PORT = draftBridgePort;
+  // External source directories are machine-specific. Imported immutable knowledge is in data.
+  delete env.STUDIO_KNOWLEDGE_SOURCE;
   await writeFile(join(config, 'compose.env'), envText(env), { mode: 0o600 });
   async function ownership(path) { await chown(path, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); if ((await stat(path)).isDirectory()) for (const name of await readdir(path)) await ownership(join(path,name)); }
   for (const name of ['data','config','model-auth','model-cache','delivery-private','tts-cache']) await ownership(join(root,name));
@@ -317,6 +332,16 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   else if (action === 'capture') await capture();
   else if (action === 'youtube-auth') await authorizeYouTube();
   else if (action === 'config') { await compose(['config', '--quiet']); console.log('Compose configuration is valid.'); }
+  else if (action === 'knowledge-config') {
+    const source = await validateKnowledgeSource(flag('--knowledge-source'));
+    const env = await settings(); env.STUDIO_KNOWLEDGE_SOURCE = source;
+    await writeFile(join(config, 'compose.env'), envText(env), { mode: 0o600 });
+    await compose(['config', '--quiet']);
+    console.log('Knowledge source configured read-only. Start the instance, then select files to import in the knowledge library.');
+  }
+  else if (action === 'model-login') {
+    await compose(['run', '--rm', '--no-deps', 'model-runner', 'codex', 'login', '--device-auth'], { timeout: 960000, onOutput: chunk => process.stdout.write(chunk) });
+  }
   else if (action === 'build') {
     await compose(['build'], { timeout: 1800000 });
     const references=[...new Set((await compose(['config','--images'])).trim().split('\n').filter(Boolean))];
@@ -338,10 +363,10 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   else if (action === 'browser-start') {await compose(['--profile','browser-publisher','build','browser-publisher'],{timeout:1800000});await compose(['--profile','browser-publisher','up','-d','--wait','browser','browser-publisher'],{timeout:600000});console.log('Optional browser services started.');}
   else if (action === 'database') { await compose(['up', '-d', '--wait', 'postgres', 'rest', 'auth', 'storage', 'mail', 'kong']); await pause(); console.log('Supabase Docker services started with publishing and scheduling paused.'); }
   else if (action === 'migrate') await migrate();
-  else if (action === 'start') { const env = await settings(); await prepareDraftBridgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await compose(['up', '-d', '--wait']); console.log('All Docker services started.'); }
+  else if (action === 'start') { const env = await settings(); await prepareDraftBridgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await prepareKnowledgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await compose(['up', '-d', '--wait']); console.log('All Docker services started.'); }
   else if (action === 'stop') { await compose(['stop']); console.log('Docker services stopped; bind data retained.'); }
   else if (action === 'status') console.log(await compose(['ps', '--format', 'json']));
   else if (action === 'backup') await backup();
   else if (action === 'restore') await restore();
-  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|youtube-auth|browser-config|browser-start|browser-smoke [--root folder]');
+  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|model-login|knowledge-config|youtube-auth|browser-config|browser-start|browser-smoke [--root folder]');
 } catch (error) { console.error(error instanceof Error ? error.message : 'Docker operation failed.'); process.exitCode = 1; }

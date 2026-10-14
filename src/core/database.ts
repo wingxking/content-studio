@@ -3,6 +3,11 @@ export function isTrustedDatabaseOrigin(url: URL): boolean {
   return !url.username && !url.password && (url.protocol === 'https:' || url.protocol === 'http:' && (['localhost', '127.0.0.1'].includes(url.hostname) || allowed.includes(url.origin)));
 }
 import { loadRuntimeEnvironment } from './runtime-env.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const requestDeadline = new AsyncLocalStorage<AbortSignal>();
+export function databaseRequestSignal(): AbortSignal | undefined { return requestDeadline.getStore(); }
+export function withDatabaseRequestSignal<T>(signal: AbortSignal, run: () => Promise<T>): Promise<T> { return requestDeadline.run(signal, run); }
 
 type DatabaseOptions = { method?: string; body?: unknown; prefer?: string };
 
@@ -26,7 +31,7 @@ export async function dbRequest(path: string, options: DatabaseOptions = {}): Pr
     response = await fetch(`${url.origin}/rest/v1/${path}`, {
       method: options.method ?? 'GET', headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: AbortSignal.timeout(30000), redirect: 'error',
+      signal: AbortSignal.any([AbortSignal.timeout(30000), ...databaseRequestSignal() ? [databaseRequestSignal()!] : []]), redirect: 'error',
     });
   } catch { throw new Error('Supabase request failed; check local service health.'); }
   if (!response.ok) throw new Error(`Supabase request failed (HTTP ${response.status}).`);
