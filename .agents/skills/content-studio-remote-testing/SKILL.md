@@ -7,6 +7,8 @@ description: Synchronize Content Studio to device k, start its Docker runtime, a
 
 The owner selected device `k` for subsequent iteration and runtime acceptance on 2026-10-14. The source repository is `https://github.com/wingxking/content-studio`, branch `main`; the remote checkout is `~/x/content-studio`. Authorized ChatGPT Connection access and SSH authentication are separate capabilities: verify the actual execution host and authenticated access before acting. Do not create a separate Codex chat unless requested.
 
+The owner named the SSH identity `k-macmini_key` and requested it for SSH connections to this device. On the source Mac, `~/.ssh/config` selects `~/.ssh/k-macmini_key` for `k`, `k.softshell-court.ts.net` and `100.96.54.32`. Keep the private key local and outside Git/shared notes; install only its public key into the intended remote user's `authorized_keys` through authenticated access. This configuration does not prove the remote installation succeeded or configure other client computers.
+
 Read `AGENTS.md`, `docs/docker-runtime.md`, `docs/acceptance.md` and `docs/accounts.md`. Preserve the source Mac instance until remote restoration and acceptance pass. Keep cloud work gated and test workspaces separate from real content.
 
 ## Synchronization and runtime
