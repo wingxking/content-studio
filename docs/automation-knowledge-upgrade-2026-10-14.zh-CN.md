@@ -74,3 +74,5 @@ Chrome 已现场核验 `radar` profile 邮箱 `radarxai@gmail.com`。YouTube Stu
 新增人工显式执行的 `tests/ecosystem-live-generation.ts`，用于独立持久化 bind 和随机 Supabase workspace 的真实母稿、知乎文章生成。使用合成的非私密软件知识材料，保留固定摘录、运行、修订和生成文件哈希；没有模拟模型、审批、账号配对、投递或清理路径。失败保留 manifest 和快照，修复授权后显式 `--retry`。这份脚本及其 TypeScript 检查本身不算真实模型生成或平台草稿验收。
 
 脚本增量 Docker 严格 TypeScript 检查通过。实际 one-off Docker 预检在 `readiness` 处返回 `workspaceInitializationAttempted=false`；随后直接查询 Supabase，随机工作区 `a95e8c1b-966e-4190-b074-28be2dd66017` 的行数为 0。仅保留私有目录 `qa-live/zhihu-live-pFLXZR/live-generation.json` 供显式恢复，没有任务、稿件、账号或投递。独立审查补齐进程中断后的 active run 重试：等待原 lease/队列可见性到期，领取原消息并沿用快照，不另建 run 或自动重送。
+
+可选 Docker browser-start 再次在 600 秒启动等待后返回 `docker failed (130)`，镜像和 browser 容器未出现；wrapper 未暴露具体 registry/网络错误。随后 browser-smoke 明确返回缺少可选服务的兼容性阻塞。基础服务保持健康。新的模型设备码也在等待本人手机号验证期间超过 15 分钟；应先完成手机号，再重启官方设备流程。真实模型生成及知乎草稿回执仍未完成。
