@@ -36,3 +36,5 @@ The owner explicitly chose **original implementation only** for the BeeCMS-inspi
 Google sign-in on k was reported complete by the owner; it still needs an independent visible profile/target check before account work. Default restore intentionally excluded Linux Codex and delivery authentication. Keep model login and platform API authorization separate from Chrome login. Never retain supplied authentication material.
 
 Before backup/restore acceptance, remove only test-created download artifacts and keep fixture workspaces identifiable. Preserve encrypted minimum browser attempt journals even when restoring without account authorization; restored leases expire, unresolved submission barriers remain, and metric polling stays stopped. Do not restart schedules or publish queues merely because tests passed.
+
+After optional fixture services start, run `sh scripts/docker.sh browser-smoke --root /Users/k/x/content-studio/.docker-k-acceptance`. It prepares a reviewed internal image manifest and cleans only its own staging; it does not contact or publish to a real platform. A failed or unavailable browser test remains an explicit acceptance blocker.

@@ -43,6 +43,25 @@ async function authorizeYouTube() {
   await compose(['run','--rm','--no-deps','--publish',`127.0.0.1:${port}:${port}`,'--volume',`${resolve(client)}:${resolve(client)}:ro`,'--env',`STUDIO_YOUTUBE_OAUTH_PORT=${port}`,'delivery-worker','node','--import','tsx','src/server/cli.ts','youtube-auth',resolve(client)],{timeout:360000,onOutput:chunk=>{pending+=chunk;const lines=pending.split('\n');pending=lines.pop()??'';for(const line of lines){const notice=youtubeAuthorizationNotice(line);if(notice) console.log(JSON.stringify(notice));}}});
   console.log('YouTube authorization and expected-channel readback completed; publishing remains separately paused or enabled by the owner.');
 }
+async function browserSmoke() {
+  const configured=JSON.parse(await readFile(join(root,'delivery-private','browser-publisher','config.json'),'utf8'));
+  if(!configured.fixturesEnabled) throw new Error('Browser smoke requires a separately configured fixture-only slot.');
+  const running=(await compose(['--profile','browser-publisher','ps','--status','running','--services'])).trim().split('\n');
+  if(!running.includes('browser') || !running.includes('browser-publisher')) throw new Error('Browser compatibility is blocked: start the optional browser and executor services before fixture smoke.');
+  const staging=join(root,'browser-staging');await mkdir(staging,{recursive:true,mode:0o700});
+  const lock=join(staging,'.smoke-lock');await mkdir(lock,{mode:0o700});
+  const attempt=randomUUID();const asset=randomUUID();const directory=join(staging,attempt);const manifest=join(staging,'smoke-request.json');
+  try {
+    await mkdir(directory,{mode:0o700});
+    const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEfcAAAAASUVORK5CYII=','base64');
+    const image=join(directory,`${asset}.png`);await privateFile(image,bytes);
+    const request={version:1,operation:'publish',platform:'xueqiu',sessionId:configured.sessionId,expectedAccountId:'123',jobId:randomUUID(),attemptId:attempt,contentHash:createHash('sha256').update(bytes).digest('hex'),revision:1,ownerToken:randomUUID(),deadline:new Date(Date.now()+30000).toISOString(),title:'Original isolated fixture',text:'Source-backed original fixture paragraphs.',symbols:[],assets:[{id:asset,name:`${asset}.png`,sha256:createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length}]};
+    await privateFile(manifest,JSON.stringify(request));
+    const env=await settings();for(const path of [directory,image,manifest]) await chown(path,Number(env.STUDIO_UID),Number(env.STUDIO_GID));
+    const result=await compose(['--profile','browser-publisher','exec','-T','browser-publisher','python','-'],{input:await readFile(join(project,'services','browser-publisher','smoke.py')),timeout:240000});
+    console.log(result.trim());
+  } finally {await rm(directory,{recursive:true,force:true});await rm(manifest,{force:true});await rm(lock,{recursive:true,force:true});}
+}
 async function privateFile(path, content) { await writeFile(path, content, { mode: 0o600, flag: 'wx' }); }
 function quote(value) { return JSON.stringify(value); }
 function envText(values) { return Object.entries(values).map(([name, value]) => `${name}=${quote(String(value))}`).join('\n') + '\n'; }
@@ -315,6 +334,7 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
     const env=await settings(); if(!env.STUDIO_BROWSER_VNC_PASSWORD) {env.STUDIO_BROWSER_VNC_PASSWORD=randomBytes(16).toString('base64url');await writeFile(join(config,'compose.env'),envText(env),{mode:0o600});}
     console.log('Optional browser slot configured; live publishing stays disabled and credentials remain private.');
   }
+  else if (action === 'browser-smoke') await browserSmoke();
   else if (action === 'browser-start') {await compose(['--profile','browser-publisher','build','browser-publisher'],{timeout:1800000});await compose(['--profile','browser-publisher','up','-d','--wait','browser','browser-publisher'],{timeout:600000});console.log('Optional browser services started.');}
   else if (action === 'database') { await compose(['up', '-d', '--wait', 'postgres', 'rest', 'auth', 'storage', 'mail', 'kong']); await pause(); console.log('Supabase Docker services started with publishing and scheduling paused.'); }
   else if (action === 'migrate') await migrate();
@@ -323,5 +343,5 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   else if (action === 'status') console.log(await compose(['ps', '--format', 'json']));
   else if (action === 'backup') await backup();
   else if (action === 'restore') await restore();
-  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|youtube-auth|browser-config|browser-start [--root folder]');
+  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|youtube-auth|browser-config|browser-start|browser-smoke [--root folder]');
 } catch (error) { console.error(error instanceof Error ? error.message : 'Docker operation failed.'); process.exitCode = 1; }
