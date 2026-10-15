@@ -4,3 +4,5 @@ export function youtubeAuthorizationNotice(line: string): { authorizationUrl: st
 export function prepareDraftBridgeDirectory(bindRoot: string, uid: number, gid: number): Promise<void>;
 export function prepareKnowledgeDirectory(bindRoot: string, uid: number, gid: number): Promise<void>;
 export function validateKnowledgeSource(value: unknown): Promise<string>;
+export function modelLoginMethod(argv: string[]): 'device' | 'browser';
+export function modelLoginCommand(method: 'device' | 'browser', name?: string, helperPath?: string): string[];

@@ -10,14 +10,20 @@ const args = process.argv.slice(2); const action = args[0];
 const flag = name => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
 const root = resolve(flag('--root') ?? process.env.STUDIO_DOCKER_ROOT ?? join(project, '.docker'));
 const config = join(root, 'config');
-async function run(command, argv, { input, output, environment = {}, timeout = 600000, onOutput } = {}) {
+async function run(command, argv, { input, output, environment = {}, timeout = 600000, onOutput, onErrorOutput, signal } = {}) {
+  if (signal?.aborted) throw new Error('Docker operation canceled.');
   const file = output ? await open(output, 'wx', 0o600) : undefined;
+  if (signal?.aborted) { await file?.close(); throw new Error('Docker operation canceled.'); }
   return new Promise((accept, reject) => {
-    const child = spawn(command, argv, { cwd: project, env: { ...process.env, ...environment }, stdio: ['pipe', file?.fd ?? 'pipe', 'pipe'] });
-    let text = ''; let error = ''; child.stdout?.on('data', bytes => { text += bytes; onOutput?.(bytes.toString()); }); child.stderr.on('data', bytes => { error = (error + bytes).slice(-20000); });
+    const child = spawn(command, argv, { cwd: project, env: { ...process.env, ...environment }, stdio: ['pipe', file?.fd ?? 'pipe', 'pipe'], signal });
+    let forceTimer;
+    const forceOnAbort = () => { forceTimer = setTimeout(() => child.kill('SIGKILL'), 2000); };
+    if (signal?.aborted) forceOnAbort(); else signal?.addEventListener('abort', forceOnAbort, { once: true });
+    const cleanSignal = () => { clearTimeout(forceTimer); signal?.removeEventListener('abort', forceOnAbort); };
+    let text = ''; let error = ''; child.stdout?.on('data', bytes => { text += bytes; onOutput?.(bytes.toString()); }); child.stderr.on('data', bytes => { error = (error + bytes).slice(-20000); onErrorOutput?.(bytes.toString()); });
     const timer = setTimeout(() => child.kill('SIGTERM'), timeout);
-    child.on('error', async () => { clearTimeout(timer); await file?.close(); reject(new Error(`${command} could not start.`)); });
-    child.on('close', async code => { clearTimeout(timer); await file?.close(); if (code !== 0) { const diagnostics=[...error.split('\n'),...text.split('\n').filter(line=>/^[\s#0-9.]*[a-zA-Z0-9_./-]+\.tsx?\([0-9]+,[0-9]+\): error TS[0-9]+:/.test(line)||/^\s*resolve\s*:\s*lstat .+: no such file/i.test(line))]; const safe = diagnostics.filter(line => /error|failed|unhealthy|permission|no such file/i.test(line) && !/key|secret|token|password|credential|jwt/i.test(line)).slice(-3).join('\n'); reject(new Error(`${command} failed (${code}). ${safe}`)); } else accept(text); });
+    child.on('error', async error => { if (signal?.aborted && error.name === 'AbortError') return; clearTimeout(timer); cleanSignal(); await file?.close(); reject(new Error(`${command} could not start.`)); });
+    child.on('close', async code => { clearTimeout(timer); cleanSignal(); await file?.close(); if (signal?.aborted) { reject(new Error('Docker operation canceled.')); return; } if (code !== 0) { const diagnostics=[...error.split('\n'),...text.split('\n').filter(line=>/^[\s#0-9.]*[a-zA-Z0-9_./-]+\.tsx?\([0-9]+,[0-9]+\): error TS[0-9]+:/.test(line)||/^\s*resolve\s*:\s*lstat .+: no such file/i.test(line))]; const safe = diagnostics.filter(line => /error|failed|unhealthy|permission|no such file/i.test(line) && !/key|secret|token|password|credential|jwt/i.test(line)).slice(-3).join('\n'); reject(new Error(`${command} failed (${code}). ${safe}`)); } else accept(text); });
     child.stdin.end(input);
   });
 }
@@ -27,6 +33,41 @@ async function settings() {
 }
 async function compose(argv, options = {}) {
   return run('docker', ['compose', '--project-directory', project, '--env-file', join(config, 'compose.env'), '-f', join(project, 'infra', 'compose.yml'), ...argv], { ...options, environment: { ...await settings(), STUDIO_DOCKER_ROOT: root, STUDIO_PROJECT_DIR:project, ...options.environment } });
+}
+export function modelLoginMethod(argv) {
+  if (argv.some(value => value.startsWith('--method='))) throw new Error('Use --method device or --method browser.');
+  const indexes = argv.flatMap((value, index) => value === '--method' ? [index] : []);
+  if (indexes.length > 1) throw new Error('Provide --method only once: device or browser.');
+  if (!indexes.length) return 'device';
+  const method = argv[indexes[0] + 1];
+  if (method !== 'device' && method !== 'browser') throw new Error('Model login --method must be device or browser.');
+  return method;
+}
+export function modelLoginCommand(method, name = '', helperPath = '') {
+  if (method === 'device') return ['run', '--rm', '--no-deps', 'model-runner', 'codex', 'login', '--device-auth'];
+  if (method !== 'browser') throw new Error('Invalid model login method.');
+  if (!/^content-studio-model-login-[0-9a-f-]{36}$/.test(name)) throw new Error('Invalid temporary model login container name.');
+  if (typeof helperPath !== 'string' || !helperPath.startsWith('/') || /[\r\n:,]/.test(helperPath)) throw new Error('Model login helper requires an absolute path without bind separators.');
+  return ['run', '--rm', '--no-deps', '--name', name, '--publish', '127.0.0.1:1455:1456', '--volume', `${helperPath}:/opt/content-studio/model-browser-login.mjs:ro`, 'model-runner', 'node', '/opt/content-studio/model-browser-login.mjs'];
+}
+async function authorizeModel() {
+  const method = modelLoginMethod(args);
+  if (method === 'device') {
+    await compose(modelLoginCommand(method), { timeout: 960000, onOutput: chunk => process.stdout.write(chunk) });
+    return;
+  }
+  const name = `content-studio-model-login-${randomUUID()}`;
+  const helperPath = join(project, 'scripts', 'model-browser-login.mjs');
+  await stat(helperPath);
+  const controller = new AbortController();
+  const stop = () => { controller.abort(); void run('docker', ['rm', '--force', name], { timeout: 15000 }).catch(() => {}); };
+  process.on('SIGINT', stop); process.on('SIGTERM', stop);
+  try {
+    await compose(modelLoginCommand(method, name, helperPath), { signal: controller.signal, timeout: 660000, onOutput: chunk => process.stdout.write(chunk), onErrorOutput: chunk => process.stderr.write(chunk) });
+  } finally {
+    process.off('SIGINT', stop); process.off('SIGTERM', stop);
+    await run('docker', ['rm', '--force', name], { timeout: 15000 }).catch(() => {});
+  }
 }
 export function youtubeAuthorizationNotice(line) {
   let value; try { value=JSON.parse(line); } catch { return null; }
@@ -340,7 +381,7 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
     console.log('Knowledge source configured read-only. Start the instance, then select files to import in the knowledge library.');
   }
   else if (action === 'model-login') {
-    await compose(['run', '--rm', '--no-deps', 'model-runner', 'codex', 'login', '--device-auth'], { timeout: 960000, onOutput: chunk => process.stdout.write(chunk) });
+    await authorizeModel();
   }
   else if (action === 'build') {
     await compose(['build'], { timeout: 1800000 });
@@ -368,5 +409,5 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   else if (action === 'status') console.log(await compose(['ps', '--format', 'json']));
   else if (action === 'backup') await backup();
   else if (action === 'restore') await restore();
-  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|model-login|knowledge-config|youtube-auth|browser-config|browser-start|browser-smoke [--root folder]');
+  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|model-login|knowledge-config|youtube-auth|browser-config|browser-start|browser-smoke [--root folder] [model-login --method device|browser]');
 } catch (error) { console.error(error instanceof Error ? error.message : 'Docker operation failed.'); process.exitCode = 1; }
