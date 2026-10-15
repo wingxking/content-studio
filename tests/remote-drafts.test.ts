@@ -105,9 +105,45 @@ test('saving a remote draft works while public publishing is paused and never re
   assert.deepEqual(saved.draftReceipt, { destination: 'platform', id: '123', url: 'https://zhuanlan.zhihu.com/p/123/edit', verification: 'adapter_reported' });
   assert.deepEqual(calls.map(call => call.method), ['checkAuth', 'syncArticle']);
   const article = z.object({ title: z.string(), content: z.string() }).parse(calls[1]?.params.article);
-  assert.ok(article.content.includes('&lt;source-backed&gt;')); assert.ok(article.content.includes('https://example.com/reference')); assert.ok(!article.content.includes('<source-backed>'));
+  assert.ok(article.content.includes('An original  article.')); assert.ok(article.content.includes('<h2>Sources</h2><p>Original reference<br>https://example.com/reference</p>')); assert.ok(!article.content.includes('<source-backed>'));
   assert.equal((await readState()).drafts[0]?.approvedHash, null); assert.equal((await readState()).paused, true);
   assert.equal((await executeRemoteDraft(job.id)).status, 'draft_saved'); assert.equal(calls.length, 2);
+});
+
+test('knowledge-only draft rendering omits the empty external Sources section', async () => {
+  const value = await fixture();
+  const draft = await createDraft({ ...value.draft.brief, sources: [], knowledgeIds: ['48de3319-8c98-477e-ae30-1f7d1b91c048'] }, content('zhihu'), undefined, undefined, { instruction: '', assetIds: [], knowledgeRef: '7ea626b1-378b-40d5-8fd0-e58a8c1a341d' });
+  const job = first(await prepareRemoteDrafts(draft.id, { expectedRevision: draft.revision, accountIds: [value.account.id] }));
+  const calls = fakeBridge(); assert.equal((await executeRemoteDraft(job.id)).status, 'draft_saved');
+  const article = z.object({ content: z.string() }).parse(calls[1]?.params.article);
+  assert.ok(article.content.includes('An original  article.')); assert.ok(article.content.includes('<p>#Coding</p>'));
+  assert.ok(!article.content.includes('<h2>Sources</h2>'));
+});
+
+test('draft rendering formats the frozen Markdown while retaining managed images and original approval', async () => {
+  const path = join(directory, 'media', 'reviewed.png'); await mkdir(join(directory, 'media'));
+  await sharp({ create: { width: 8, height: 8, channels: 3, background: '#ff0000' } }).png().toFile(path);
+  const value = await fixture('zhihu', [path]);
+  const generated = content('zhihu', [path]);
+  const markdown = '## Fixed revision\n\n**Review** the backup.\n\n- Keep evidence\n- Verify bytes\n\n![Unmanaged image](https://remote.example/image.png)\n\n<script>alert(1)</script>';
+  generated.variants[0]!.text = markdown;
+  const updated = await replaceDraft(value.draft.id, generated, value.draft.revision);
+  await approveDraft(updated.id);
+  const approved = (await readState()).drafts.find(draft => draft.id === updated.id)?.approvedHash;
+  const job = first(await prepareRemoteDrafts(updated.id, { expectedRevision: updated.revision, accountIds: [value.account.id] }));
+  assert.equal(job.snapshot?.variant.text, markdown);
+  const calls = fakeBridge();
+  const saved = await executeRemoteDraft(job.id); assert.equal(saved.status, 'draft_saved');
+  const article = z.object({ content: z.string(), cover: z.string(), markdown: z.never().optional() }).parse(calls[1]?.params.article);
+  for (const expected of ['<h2>Fixed revision</h2>', '<strong>Review</strong>', '<li>Keep evidence</li>', 'Unmanaged image', '<p>#Coding</p>', '<h2>Sources</h2>', 'https://example.com/reference']) assert.ok(article.content.includes(expected), expected);
+  assert.ok(article.cover.startsWith('data:image/png;base64,'));
+  assert.ok(article.content.includes(`<p><img src="${article.cover}" alt=""></p>`));
+  assert.equal((article.content.match(/<img /g) ?? []).length, 1);
+  for (const forbidden of ['remote.example', '<script', 'alert(1)', '## Fixed', '**Review**']) assert.ok(!article.content.includes(forbidden), forbidden);
+  const current = (await readState()).drafts.find(draft => draft.id === updated.id);
+  assert.equal(current?.revision, updated.revision); assert.equal(current?.variants[0]?.text, markdown);
+  assert.equal(current?.approvedHash, approved); assert.ok(approved);
+  assert.equal(saved.contentHash, job.contentHash); assert.equal(saved.approvedHash, job.approvedHash);
 });
 
 test('changed browser identity fails before dispatch with zero attempts', async () => {

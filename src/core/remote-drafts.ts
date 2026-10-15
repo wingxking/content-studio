@@ -8,6 +8,7 @@ import { mutateState, readState } from './store.ts';
 import { adapterPlatform, draftBridgeRequest, nativeDraftPlatforms, sameDraftAccount, verifyDraftAccount } from './draft-connectors.ts';
 import { isManagedMediaPath, resolveMediaLocation } from './media-location.ts';
 import { savePostizDraft, validatePostizVariant, verifyIntegration } from './postiz.ts';
+import { safeMarkdownToHtml } from './safe-markdown.ts';
 
 const now = (): string => new Date().toISOString();
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -44,10 +45,10 @@ async function draftImages(variant: Variant): Promise<{ hashes: string[]; html: 
   return { hashes, html: images.map(image => `<p><img src="${image}" alt=""></p>`).join(''), ...(images[0] ? { cover: images[0] } : {}) };
 }
 function articleContent(draft: Draft, variant: Variant, images: string): string {
-  const text = variant.text.split(/\n{2,}/).map(paragraph => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`).join('');
+  const text = safeMarkdownToHtml(variant.text);
   const tags = variant.tags.length ? `<p>${escapeHtml(variant.tags.map(tag => `#${tag.replace(/^#+/, '')}`).join(' '))}</p>` : '';
   const sources = draft.brief.sources.map(source => `<p>${escapeHtml(source.title)}<br>${escapeHtml(source.url)}</p>`).join('');
-  return `${text}${images}${tags}<h2>Sources</h2>${sources}`;
+  return `${text}${images}${tags}${sources ? `<h2>Sources</h2>${sources}` : ''}`;
 }
 export const saveDraftsInputSchema = z.object({ accountIds: z.array(z.uuid()).min(1).max(platformIds.length), expectedRevision: z.number().int().positive() });
 export async function prepareRemoteDrafts(id: string, value: z.infer<typeof saveDraftsInputSchema>): Promise<Job[]> {
