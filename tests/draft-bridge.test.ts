@@ -2,26 +2,35 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, test } from 'node:test';
 import { WebSocket } from 'ws';
-import { createDraftBridge } from '../src/server/draft-bridge.ts';
+import { createDraftBridge, type DraftBridgeOptions } from '../src/server/draft-bridge.ts';
 import { draftBridgeConfigStatus, readDraftBridgeConfig, saveDraftBridgeConfig, type DraftBridgeConfig } from '../src/core/draft-bridge-config.ts';
 
 const fixture: DraftBridgeConfig = { extensionId: 'a'.repeat(32), extensionToken: 'private-extension-token-fixture', pairingKey: 'pairing-key-fixture-'.repeat(3), serviceKey: 'service-key-fixture-'.repeat(3) };
 let directory: string; let configPath: string;
 let bridge: ReturnType<typeof createDraftBridge>; let address: { wsPort: number; httpPort: number };
 const clients: WebSocket[] = [];
+const received = new Map<WebSocket, Message[]>();
 
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'studio-draft-bridge-')); configPath = join(directory, 'private', 'config.json');
   await saveDraftBridgeConfig(fixture, configPath);
   bridge = createDraftBridge({ configPath, host: '127.0.0.1', wsPort: 0, httpPort: 0, readTimeoutMs: 250, writeTimeoutMs: 250 }); address = await bridge.start();
 });
-afterEach(async () => { for (const client of clients.splice(0)) client.terminate(); await bridge.close(); await rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { for (const client of clients.splice(0)) client.terminate(); received.clear(); await bridge.close(); await rm(directory, { recursive: true, force: true }); });
 
-async function connect(options: { origin?: string; key?: string } = {}): Promise<WebSocket> {
+async function connect(options: { origin?: string; key?: string; autoHeartbeat?: boolean } = {}): Promise<WebSocket> {
   const client = new WebSocket(`ws://127.0.0.1:${address.wsPort}/connect?key=${options.key ?? fixture.pairingKey}`, { headers: { Origin: options.origin ?? `chrome-extension://${fixture.extensionId}` } }); clients.push(client);
-  return new Promise((resolve, reject) => { client.once('open', () => resolve(client)); client.once('error', reject); });
+  received.set(client, []);
+  client.on('message', bytes => {
+    const message = JSON.parse(bytes.toString()) as Message; received.get(client)?.push(message);
+    if (isHeartbeat(message) && options.autoHeartbeat !== false) replyHeartbeat(client, message);
+  });
+  await new Promise<void>((resolve, reject) => { client.once('open', resolve); client.once('error', reject); });
+  if (options.autoHeartbeat !== false) await until(async () => (await status()).connected);
+  return client;
 }
 const headers = () => ({ Authorization: `Bearer ${fixture.serviceKey}`, 'Content-Type': 'application/json' });
 async function request(value: unknown, extra: Record<string, string> = {}): Promise<{ status: number; data: unknown }> {
@@ -29,7 +38,18 @@ async function request(value: unknown, extra: Record<string, string> = {}): Prom
   return { status: response.status, data: await response.json() };
 }
 type Message = { id: string; method: string; token: string; params: Record<string, unknown> };
-function nextMessage(client: WebSocket): Promise<Message> { return new Promise(resolve => client.once('message', bytes => resolve(JSON.parse(bytes.toString()) as Message))); }
+const isHeartbeat = (message: Message): boolean => message.method === 'checkAuth' && message.params.platform === 'zip-download';
+const heartbeats = (client: WebSocket): Message[] => received.get(client)?.filter(isHeartbeat) ?? [];
+function replyHeartbeat(client: WebSocket, message: Message): void { client.send(JSON.stringify({ id: message.id, result: { isAuthenticated: true, username: '本地下载' } })); }
+function nextMessage(client: WebSocket): Promise<Message> { return new Promise(resolve => {
+  const listener = (bytes: Buffer) => { const message = JSON.parse(bytes.toString()) as Message; if (isHeartbeat(message)) return; client.off('message', listener); resolve(message); };
+  client.on('message', listener);
+}); }
+async function status(): Promise<{ connected: boolean }> { const response = await fetch(`http://127.0.0.1:${address.httpPort}/status`, { headers: headers() }); return await response.json() as { connected: boolean }; }
+async function until(check: () => boolean | Promise<boolean>): Promise<void> { const deadline = Date.now() + 1500; while (!await check()) { if (Date.now() > deadline) throw new Error('Bridge fixture condition timed out.'); await delay(5); } }
+async function accelerated(options: Partial<DraftBridgeOptions> = {}): Promise<void> {
+  await bridge.close(); bridge = createDraftBridge({ configPath, host: '127.0.0.1', wsPort: 0, httpPort: 0, readTimeoutMs: 250, writeTimeoutMs: 600, heartbeatIntervalMs: 25, heartbeatTimeoutMs: 150, ...options }); address = await bridge.start();
+}
 const sync = (platform = 'zhihu') => ({ method: 'syncArticle', params: { platforms: [platform], article: { title: 'Reviewed title', content: '<p>Reviewed original article</p>' } } });
 
 test('bridge config is private, atomic, strict and never reveals tokens through status or errors', async () => {
@@ -86,6 +106,8 @@ test('only reviewed one-target draft methods are forwarded without a publish opt
     { ...sync(), params: { ...sync().params, draftOnly: false } },
     { ...sync(), params: { ...sync().params, article: { ...sync().params.article, publish: true } } },
     { method: 'uploadImage', params: { platform: 'weibo', mimeType: 'image/png', imageData: 'YQ==' } },
+    { method: 'checkAuth', params: { platform: 'zip-download' } }, sync('zip-download'),
+    { method: 'uploadImage', params: { platform: 'zip-download', mimeType: 'image/png', imageData: 'YQ==' } },
   ]) assert.equal((await request(value)).status, 400);
 });
 
@@ -126,4 +148,76 @@ test('config rotation invalidates the old browser session before further dispatc
   assert.equal((await request({ method: 'checkAuth', params: { platform: 'zhihu' } })).status, 503);
   const status = await fetch(`http://127.0.0.1:${address.httpPort}/status`, { headers: headers() });
   assert.deepEqual(await status.json(), { configured: true, connected: false });
+});
+
+test('the first internal local probe authenticates the extension before any business dispatch', async () => {
+  await accelerated();
+  await assert.rejects(connect({ origin: 'https://unapproved.example' }), /403/u);
+  await assert.rejects(connect({ key: 'wrong-key' }), /403/u);
+  assert.ok([...received.values()].every(messages => messages.length === 0));
+  const client = await connect({ autoHeartbeat: false }); await until(() => heartbeats(client).length === 1);
+  const probe = heartbeats(client)[0]!;
+  assert.deepEqual({ method: probe.method, token: probe.token, params: probe.params }, { method: 'checkAuth', token: fixture.extensionToken, params: { platform: 'zip-download' } });
+  assert.equal((await status()).connected, false); assert.equal((await request(sync())).status, 503);
+  replyHeartbeat(client, probe); await until(async () => (await status()).connected);
+  assert.equal((await request({ method: 'checkAuth', params: { platform: 'zip-download' } })).status, 400);
+});
+
+test('local heartbeats continue through a long business request without releasing its lock or resending it', async () => {
+  await accelerated(); const client = await connect();
+  const next = nextMessage(client); const saving = request(sync()); const business = await next;
+  await until(() => heartbeats(client).length >= 3);
+  assert.deepEqual(await request({ method: 'listPlatforms' }), { status: 409, data: { error: { code: 'BUSY', message: 'A browser companion request is already running.' } } });
+  assert.ok(heartbeats(client).every(probe => probe.method === 'checkAuth' && Object.keys(probe.params).length === 1 && probe.params.platform === 'zip-download'));
+  client.send(JSON.stringify({ id: business.id, result: { results: [], syncId: 'one-write' } }));
+  assert.equal((await saving).status, 200);
+  assert.equal(received.get(client)?.filter(message => message.method === 'syncArticle').length, 1);
+});
+
+test('a single unanswered heartbeat neither queues more probes nor blocks business requests', async () => {
+  await accelerated({ heartbeatTimeoutMs: 350 });
+  const client = await connect({ autoHeartbeat: false }); await until(() => heartbeats(client).length === 1); replyHeartbeat(client, heartbeats(client)[0]!);
+  await until(() => heartbeats(client).length === 2); await delay(75);
+  assert.equal(heartbeats(client).length, 2);
+  const message = nextMessage(client); const result = request({ method: 'checkAuth', params: { platform: 'zhihu' } }); const business = await message;
+  const probe = heartbeats(client)[1]!;
+  // A wrong or completed heartbeat ID cannot resolve the separately tracked business request.
+  replyHeartbeat(client, heartbeats(client)[0]!); client.send(JSON.stringify({ id: 'not-the-current-probe', result: { isAuthenticated: true, username: '本地下载' } }));
+  client.send(JSON.stringify({ id: business.id, result: { isAuthenticated: false } }));
+  assert.deepEqual(await result, { status: 200, data: { result: { isAuthenticated: false } } });
+  replyHeartbeat(client, probe);
+});
+
+test('heartbeat rejection, invalid responses and timeout preserve dispatched writes as unknown with no replay', async () => {
+  for (const failure of ['401', '403', 'invalid', 'malformed', 'timeout'] as const) {
+    await accelerated({ heartbeatTimeoutMs: 70 });
+    const client = await connect({ autoHeartbeat: false }); await until(() => heartbeats(client).length === 1); replyHeartbeat(client, heartbeats(client)[0]!);
+    await until(async () => (await status()).connected);
+    const message = nextMessage(client); const result = request(sync()); await message;
+    await until(() => heartbeats(client).length === 2); const probe = heartbeats(client)[1]!;
+    if (failure === '401' || failure === '403') client.send(JSON.stringify({ id: probe.id, error: { code: Number(failure), message: 'private-token https://private.example/?token=secret' } }));
+    else if (failure === 'invalid') client.send(JSON.stringify({ id: probe.id, result: { isAuthenticated: false, error: 'private-token' } }));
+    else if (failure === 'malformed') client.send(JSON.stringify({ id: probe.id, result: { isAuthenticated: true }, extra: 'private-token' }));
+    const ended = await result;
+    assert.equal(ended.status, 502); assert.equal((ended.data as { error: { code: string } }).error.code, 'UNKNOWN_OUTCOME');
+    assert.doesNotMatch(JSON.stringify(ended.data), /private-token|private\.example/u);
+    await until(() => client.readyState === WebSocket.CLOSED); const count = heartbeats(client).length; await delay(55);
+    assert.equal(heartbeats(client).length, count); assert.equal(received.get(client)?.filter(item => item.method === 'syncArticle').length, 1); assert.equal((await status()).connected, false);
+    const replacement = await connect(); replyHeartbeat(replacement, probe); assert.equal((await status()).connected, true);
+    assert.equal(received.get(replacement)?.some(item => item.method === 'syncArticle'), false);
+  }
+});
+
+test('idle config rotation, config removal and shutdown clear all heartbeat state', async () => {
+  for (const change of ['rotate', 'remove', 'invalid', 'close', 'shutdown'] as const) {
+    await saveDraftBridgeConfig(fixture, configPath); await accelerated(); const client = await connect();
+    if (change === 'rotate') await saveDraftBridgeConfig({ ...fixture, extensionToken: 'rotated-private-fixture' }, configPath);
+    else if (change === 'remove') await rm(configPath);
+    else if (change === 'invalid') await writeFile(configPath, 'invalid-private-config');
+    else if (change === 'close') client.terminate();
+    else await bridge.close();
+    await until(() => client.readyState === WebSocket.CLOSED); const count = heartbeats(client).length; await delay(55);
+    assert.equal(heartbeats(client).length, count);
+    if (change !== 'remove' && change !== 'invalid' && change !== 'shutdown') assert.equal((await status()).connected, false);
+  }
 });

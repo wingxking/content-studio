@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import express from 'express';
 import { WebSocket } from 'ws';
 import { z } from 'zod';
@@ -44,7 +45,8 @@ try {
     const message = z.object({ id: z.string(), method: z.string(), token: z.string(), params: z.record(z.string(), z.unknown()) }).parse(JSON.parse(raw.toString()));
     assert.equal(message.token, config.extensionToken);
     let result: unknown;
-    if (message.method === 'checkAuth') result = { isAuthenticated: true, userId: `fixture-${String(message.params.platform)}`, username: 'Isolated draft acceptance' };
+    if (message.method === 'checkAuth' && message.params.platform === 'zip-download') result = { isAuthenticated: true, username: '本地下载' };
+    else if (message.method === 'checkAuth') result = { isAuthenticated: true, userId: `fixture-${String(message.params.platform)}`, username: 'Isolated draft acceptance' };
     else {
       assert.equal(message.method, 'syncArticle'); writes++;
       const parameters = z.object({ platforms: z.tuple([z.enum(['weixin', 'zhihu', 'bilibili'])]), article: z.object({ title: z.string(), content: z.string() }) }).parse(message.params);
@@ -56,6 +58,13 @@ try {
     socket?.send(JSON.stringify({ id: message.id, result }));
   });
   await new Promise<void>((resolve, reject) => { socket!.once('open', resolve); socket!.once('error', reject); });
+  let connected = false;
+  for (let attempt = 0; attempt < 100 && !connected; attempt++) {
+    const response: Response = await fetch(`http://127.0.0.1:${ports.httpPort}/status`, { headers: { Authorization: `Bearer ${config.serviceKey}` } });
+    assert.equal(response.status, 200); connected = z.object({ connected: z.boolean() }).parse(await response.json()).connected;
+    if (!connected) await delay(10);
+  }
+  assert.equal(connected, true, 'Fixture extension must complete the local authentication probe.');
   const platforms = ['wechat', 'zhihu', 'bilibili'] as const;
   const accounts: string[] = [];
   for (const platform of platforms) {

@@ -49,6 +49,28 @@ test('pairing form masks credentials and never initially renders a private conne
   assert.equal(password.getAttribute('autoComplete') ?? password.getAttribute('autocomplete'), 'off');
   assert.equal(document.querySelector('textarea'), null);
   assert.equal(document.querySelectorAll('.capability-grid > article').length, 3);
+  assert.equal(document.querySelector('select option[selected]')?.getAttribute('value'), 'zhihu');
+  assert.match(html, /本轮仅核对知乎，未检查其他平台/);
+  assert.equal([...document.querySelectorAll('.capability-grid .badge')].filter(badge => badge.textContent === '未核对本平台').length, 3);
+});
+
+test('an unchecked platform cannot reuse a previously detected identity for binding', () => {
+  const html = renderToStaticMarkup(createElement(DraftIdentityCard, { identity: { platform: 'wechat', isAuthenticated: true, userId: 'previous-account' }, accounts: [], connected: true, checked: false, disabled: false, onConnect: async () => {} }));
+  const { document } = parseHTML(html);
+  assert.match(html, /未核对本平台/); assert.match(html, /本轮没有访问此平台/);
+  assert.equal(document.querySelector('button')?.hasAttribute('disabled'), true);
+  assert.equal(document.querySelector('input[type="checkbox"]'), null);
+});
+
+test('authentication check errors are displayed as unavailable rather than signed out', () => {
+  for (const errorCode of ['timeout', 'check_failed'] as const) {
+    const html = renderToStaticMarkup(createElement(DraftIdentityCard, { identity: { platform: 'zhihu', isAuthenticated: false, errorCode, error: '安全的核对诊断。' }, accounts: [], connected: true, disabled: false, onConnect: async () => {} }));
+    const { document } = parseHTML(html);
+    assert.match(html, errorCode === 'timeout' ? /身份核对超时/u : /身份核对不可用/u);
+    assert.match(html, /不代表账号已经退出登录/u); assert.doesNotMatch(html, /待登录或连接|请登录目标创作者账号/u);
+    assert.equal(document.querySelector('button')?.hasAttribute('disabled'), true);
+    assert.equal(document.querySelector('input[type="checkbox"]'), null);
+  }
 });
 
 test('ecosystem catalog distinguishes provider drafts from unfinished integrations', () => {

@@ -33,10 +33,21 @@ export async function draftBridgeRequest(method: 'checkAuth' | 'syncArticle', pa
   if (!response.ok) throw new Error('The draft companion could not complete the request. Check the connection and inspect the platform draft box before retrying a save.');
   return z.object({ result: z.unknown() }).parse(await response.json()).result;
 }
-const authSchema = z.object({ isAuthenticated: z.boolean(), userId: z.union([z.string(), z.number()]).transform(String).optional(), username: z.string().max(200).optional() });
-export async function draftAccountIdentity(platform: Platform) {
-  const result = authSchema.parse(await draftBridgeRequest('checkAuth', { platform: adapterPlatform(platform) }));
-  return { platform: nativeDraftPlatformSchema.parse(platform), ...result };
+const authSchema = z.object({ isAuthenticated: z.boolean(), userId: z.union([z.string(), z.number()]).transform(String).optional(), username: z.string().max(200).optional(), error: z.string().optional() });
+export type DraftAccountIdentity = { platform: z.infer<typeof nativeDraftPlatformSchema>; isAuthenticated: boolean; userId?: string; username?: string; error?: string; errorCode?: 'timeout' | 'check_failed' };
+function unavailableIdentity(platform: DraftAccountIdentity['platform'], error: unknown): DraftAccountIdentity {
+  const message = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
+  const timeout = /timeout|timed[\s_-]*out|超时/iu.test(message);
+  return { platform, isAuthenticated: false, errorCode: timeout ? 'timeout' : 'check_failed', error: timeout ? '平台身份核对超时。请保持扩展连接后重试；当前尚未确认登录状态。' : '平台身份核对暂不可用。请检查扩展连接后重试；当前尚未确认登录状态。' };
+}
+export async function draftAccountIdentity(platform: Platform): Promise<DraftAccountIdentity> {
+  const selected = nativeDraftPlatformSchema.parse(platform);
+  try {
+    const result = authSchema.parse(await draftBridgeRequest('checkAuth', { platform: adapterPlatform(selected) }));
+    if (result.error?.trim()) return unavailableIdentity(selected, result.error);
+    const { error: _error, ...identity } = result;
+    return { platform: selected, ...identity };
+  } catch (error) { return unavailableIdentity(selected, error); }
 }
 export async function draftBridgeStatus() {
   const config = await readDraftBridgeConfig();
@@ -47,13 +58,14 @@ export async function draftBridgeStatus() {
   } catch { /* An optional disconnected companion does not block the studio. */ }
   return { configured: Boolean(config), connected, extensionId: config?.extensionId ?? null, bridgePort: bridgePort() };
 }
-export async function draftConnectorStatus() {
+export async function draftConnectorStatus(selectedPlatform?: z.infer<typeof nativeDraftPlatformSchema>) {
+  const platforms = selectedPlatform === undefined ? nativeDraftPlatforms : [nativeDraftPlatformSchema.parse(selectedPlatform)];
   const bridge = await draftBridgeStatus();
-  const accounts: { platform: typeof nativeDraftPlatforms[number]; isAuthenticated: boolean; userId?: string; username?: string; error?: string }[] = [];
+  const accounts: DraftAccountIdentity[] = [];
   // The upstream extension serializes requests, including authentication reads.
-  if (bridge.connected) for (const platform of nativeDraftPlatforms) {
+  if (bridge.connected) for (const platform of platforms) {
     try { accounts.push(await draftAccountIdentity(platform)); }
-    catch { accounts.push({ platform, isAuthenticated: false, error: 'Account check unavailable. Keep the companion connected and sign in to this platform.' }); }
+    catch { accounts.push(unavailableIdentity(platform, null)); }
   }
   return { bridge, accounts, ecosystem: publishingEcosystem() };
 }
@@ -72,6 +84,7 @@ export async function bindDraftAccount(platform: Platform, input: z.infer<typeof
   const permission = bindDraftAccountSchema.parse(input);
   const config = await readDraftBridgeConfig(); if (!config) throw new Error('Configure the companion first.');
   const identity = await draftAccountIdentity(platform);
+  if (identity.error) throw new Error(identity.error);
   if (!identity.isAuthenticated || identity.userId !== permission.expectedUserId) throw new Error('The signed-in platform identity changed. Refresh connections and choose the actual account.');
   return mutateState(state => {
     let account = accountId ? state.accounts.find(item => item.id === accountId) : state.accounts.find(item => item.platform === platform && item.draftConnection?.userId === identity.userId);
@@ -91,5 +104,6 @@ export async function verifyDraftAccount(account: Account): Promise<void> {
   const config = await readDraftBridgeConfig(); const connection = account.draftConnection;
   if (account.provider !== 'native' || account.status !== 'connected' || !connection?.permissionConfirmed || !config || connection.extensionId !== config.extensionId) throw new Error('Connect and confirm this native draft account first.');
   const identity = await draftAccountIdentity(account.platform);
+  if (identity.error) throw new Error(identity.error);
   if (!identity.isAuthenticated || identity.userId !== connection.userId) throw new Error('The browser account differs from the reviewed target. Restore the selected platform login before saving.');
 }

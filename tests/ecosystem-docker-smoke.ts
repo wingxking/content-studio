@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import express from 'express';
 import { WebSocket } from 'ws';
 import { z } from 'zod';
@@ -77,11 +78,19 @@ try {
   socket = new WebSocket(`ws://127.0.0.1:${ports.wsPort}/connect?key=${config.pairingKey}`, { origin: `chrome-extension://${config.extensionId}` });
   socket.on('message', raw => {
     const message = z.object({ id: z.string(), method: z.string(), token: z.string(), params: z.record(z.string(), z.unknown()) }).parse(JSON.parse(raw.toString())); assert.equal(message.token, config.extensionToken); let result: unknown;
-    if (message.method === 'checkAuth') result = { isAuthenticated: true, userId: `ecosystem-${workspaceId}-${String(message.params.platform)}`, username: 'Isolated fixture' };
+    if (message.method === 'checkAuth' && message.params.platform === 'zip-download') result = { isAuthenticated: true, username: '本地下载' };
+    else if (message.method === 'checkAuth') result = { isAuthenticated: true, userId: `ecosystem-${workspaceId}-${String(message.params.platform)}`, username: 'Isolated fixture' };
     else { assert.equal(message.method, 'syncArticle'); draftWrites++; const parameters = z.object({ platforms: z.tuple([z.enum(['weixin', 'zhihu', 'bilibili'])]), article: z.object({ content: z.string() }) }).parse(message.params); assert.match(parameters.article.content, /https:\/\/www.w3.org/u); const platform = parameters.platforms[0]; const id = String(7000 + draftWrites); const postUrl = platform === 'weixin' ? `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&appmsgid=${id}&token=fixture-only-secret` : platform === 'zhihu' ? `https://zhuanlan.zhihu.com/p/${id}/edit` : `https://member.bilibili.com/platform/upload/text/edit?aid=${id}`; result = { results: [{ platform, success: true, draftOnly: true, postId: id, postUrl }] }; }
     socket?.send(JSON.stringify({ id: message.id, result }));
   });
   await new Promise<void>((accept, reject) => { socket!.once('open', accept); socket!.once('error', reject); });
+  let connected = false;
+  for (let attempt = 0; attempt < 100 && !connected; attempt++) {
+    const response: Response = await fetch(`http://127.0.0.1:${ports.httpPort}/status`, { headers: { Authorization: `Bearer ${config.serviceKey}` } });
+    assert.equal(response.status, 200); connected = z.object({ connected: z.boolean() }).parse(await response.json()).connected;
+    if (!connected) await delay(10);
+  }
+  assert.equal(connected, true, 'Fixture extension must complete the local authentication probe.');
   const accountIds: string[] = []; for (const platform of platforms) accountIds.push(z.object({ id: z.uuid() }).parse(await post('publishing/draft-connectors/accounts', { platform, expectedUserId: `ecosystem-${workspaceId}-${platform === 'wechat' ? 'weixin' : platform}`, permissionConfirmed: true })).id);
   const deliveryInput = { accountIds, expectedRevision: approved.revision }; const operations = z.array(z.object({ id: z.uuid() })).parse(await post(`drafts/${approved.id}/save-drafts`, deliveryInput)); assert.equal(operations.length, 3);
   process.env.STUDIO_WORKER_ROLE = 'delivery'; for (let index = 0; index < 3; index++) assert.equal(await runWorkerOnce(), true);

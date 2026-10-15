@@ -5,7 +5,10 @@ import { confirmDraftReceipt, saveDraftsInputSchema, saveRemoteDrafts } from '..
 import { readState } from '../core/store.ts';
 
 export const draftConnectorApi = Router();
-draftConnectorApi.get('/publishing/draft-connectors', async (_req, res) => res.json(await draftConnectorStatus()));
+draftConnectorApi.get('/publishing/draft-connectors', async (req, res) => {
+  const query = z.object({ platform: nativeDraftPlatformSchema.optional() }).strict().parse(req.query);
+  res.json(await draftConnectorStatus(query.platform));
+});
 draftConnectorApi.post('/publishing/draft-connectors/bridge', async (req, res) => res.json(await configureDraftBridge(req.body)));
 draftConnectorApi.get('/publishing/draft-connectors/bridge-connection', async (_req, res) => res.json(await draftBridgeConnectionUrl()));
 draftConnectorApi.post('/publishing/draft-connectors/accounts', async (req, res) => {
