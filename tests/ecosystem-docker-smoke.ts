@@ -10,11 +10,13 @@ import { WebSocket } from 'ws';
 import { z } from 'zod';
 
 const { loadRuntimeEnvironment } = await import('../src/core/runtime-env.ts');
+const { isTrustedDatabaseOrigin } = await import('../src/core/database.ts');
 await loadRuntimeEnvironment();
 if (process.env.STUDIO_CONTAINER !== 'true' || !process.env.SUPABASE_URL) throw new Error('Run explicitly inside configured local Docker networking.');
 const database = new URL(process.env.SUPABASE_URL);
-if (database.protocol !== 'http:' || !['kong', 'localhost', '127.0.0.1'].includes(database.hostname)) throw new Error('This acceptance requires isolated local Supabase, never a hosted database.');
-const environment = { ...process.env }; const workspaceId = randomUUID(); const directory = await mkdtemp(join(tmpdir(), 'ecosystem-acceptance-'));
+const kubernetesDatabase = process.env.STUDIO_ORCHESTRATOR === 'kubernetes' && database.hostname === 'host.orb.internal' && isTrustedDatabaseOrigin(database);
+if (database.protocol !== 'http:' || !['kong', 'localhost', '127.0.0.1'].includes(database.hostname) && !kubernetesDatabase) throw new Error('This acceptance requires isolated local Supabase, never a hosted database.');
+const environment = { ...process.env }; const originalFetch = globalThis.fetch; const workspaceId = randomUUID(); const directory = await mkdtemp(join(tmpdir(), 'ecosystem-acceptance-'));
 process.env.STUDIO_WORKSPACE_ID = workspaceId; process.env.STUDIO_DATA_DIR = directory; process.env.STUDIO_LOCALFS_DIR = join(directory, 'localfs');
 process.env.STUDIO_KNOWLEDGE_IMPORT_DIR = join(directory, 'knowledge-inbox'); process.env.STUDIO_WORKER_ROLE = 'article';
 process.env.CODEX_HOME = join(directory, 'model-fixture'); delete process.env.STUDIO_MODEL_EXECUTOR_URL;
@@ -25,7 +27,7 @@ const { dbRequest, dbRpc } = await import('../src/core/database.ts');
 const { KnowledgeStore } = await import('../src/core/knowledge.ts');
 const { createKnowledgeApi } = await import('../src/server/knowledge-api.ts');
 const { taskInputSchema } = await import('../src/core/task-model.ts');
-const { createTask, enqueueTaskRun, getTaskRun, getTask, retryTaskRun, configureTaskRuntime, enqueueWork } = await import('../src/core/tasks.ts');
+const { createTask, enqueueTaskRun, getTaskRun, getTask, retryTaskRun, configureTaskRuntime, enqueueWork, updateTask } = await import('../src/core/tasks.ts');
 const { listDiscoveryPromotions } = await import('../src/core/discovery-automation.ts');
 const { mutateState, readState } = await import('../src/core/store.ts');
 const { approveDraft } = await import('../src/core/pipeline.ts');
@@ -66,6 +68,11 @@ try {
   assert.equal(await runWorkerOnce(), true); const partial = await getTaskRun(promotion.childRunId); assert.equal(partial.status, 'failed'); assert.ok(partial.master); assert.equal(partial.variants.length, 1);
   await writeFile(join(process.env.STUDIO_KNOWLEDGE_IMPORT_DIR!, 'workflow.txt'), 'Changed mounted knowledge must not alter an existing child run.'); const newer = (await store.import(['workflow.txt']))[0]!; assert.notEqual(newer.id, imported.id);
   failAdaptation = false; await retryTaskRun(promotion.childRunId); assert.equal(await runWorkerOnce(), true); const completed = await getTaskRun(promotion.childRunId); assert.equal(completed.status, 'succeeded'); assert.equal(completed.attempt, 2); assert.equal(masters, 1);
+  // Immutable file exports now follow the committed article through its existing worker outbox.
+  for (let index = 0; index < 20 && await runWorkerOnce(); index++) { /* Drain only this random fixture workspace. */ }
+  assert.equal(await runWorkerOnce(), false);
+  const exports = (await listOperations(completed.draftId!)).filter(operation => operation.kind === 'article_export');
+  assert.ok(exports.length > 0); assert.equal(exports.every(operation => operation.status === 'succeeded'), true);
   const draft = (await readState()).drafts.find(item => item.id === completed.draftId)!; assert.ok(draft); assert.equal(draft.generationKnowledgeRef, completed.id);
   assert.equal((await readDraftRevision(draft.id, draft.revision)).generationKnowledgeRef, completed.id); assert.equal((await resolveGenerationContext(draft)).knowledgeRef, completed.id);
   assert.equal((await store.readSnapshot(completed.id, child.knowledgeIds))[1]?.sha256, imported.sha256);
@@ -78,9 +85,9 @@ try {
   socket = new WebSocket(`ws://127.0.0.1:${ports.wsPort}/connect?key=${config.pairingKey}`, { origin: `chrome-extension://${config.extensionId}` });
   socket.on('message', raw => {
     const message = z.object({ id: z.string(), method: z.string(), token: z.string(), params: z.record(z.string(), z.unknown()) }).parse(JSON.parse(raw.toString())); assert.equal(message.token, config.extensionToken); let result: unknown;
-    if (message.method === 'checkAuth' && message.params.platform === 'zip-download') result = { isAuthenticated: true, username: '本地下载' };
+    if (message.method === 'studio.hello') result = { protocol: 'content-studio-drafts', version: 1, draftOnly: true, platforms: ['weixin', 'zhihu', 'bilibili'] };
     else if (message.method === 'checkAuth') result = { isAuthenticated: true, userId: `ecosystem-${workspaceId}-${String(message.params.platform)}`, username: 'Isolated fixture' };
-    else { assert.equal(message.method, 'syncArticle'); draftWrites++; const parameters = z.object({ platforms: z.tuple([z.enum(['weixin', 'zhihu', 'bilibili'])]), article: z.object({ content: z.string() }) }).parse(message.params); assert.match(parameters.article.content, /https:\/\/www.w3.org/u); const platform = parameters.platforms[0]; const id = String(7000 + draftWrites); const postUrl = platform === 'weixin' ? `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&appmsgid=${id}&token=fixture-only-secret` : platform === 'zhihu' ? `https://zhuanlan.zhihu.com/p/${id}/edit` : `https://member.bilibili.com/platform/upload/text/edit?aid=${id}`; result = { results: [{ platform, success: true, draftOnly: true, postId: id, postUrl }] }; }
+    else { assert.equal(message.method, 'syncArticle'); draftWrites++; const parameters = z.object({ platforms: z.tuple([z.enum(['weixin', 'zhihu', 'bilibili'])]), article: z.object({ content: z.string() }) }).parse(message.params); assert.match(parameters.article.content, /https:\/\/www.w3.org/u); const platform = parameters.platforms[0]; const id = String(7000 + draftWrites); const postUrl = platform === 'weixin' ? `https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&appmsgid=${id}&token=fixture-only-secret` : platform === 'zhihu' ? `https://zhuanlan.zhihu.com/p/${id}/edit` : `https://member.bilibili.com/platform/upload/text/edit?aid=${id}`; result = { execution: message.params.execution, results: [{ platform, success: true, draftOnly: true, postId: id, postUrl }] }; }
     socket?.send(JSON.stringify({ id: message.id, result }));
   });
   await new Promise<void>((accept, reject) => { socket!.once('open', accept); socket!.once('error', reject); });
@@ -98,12 +105,88 @@ try {
   for (const job of state.jobs) { assert.equal(job.status, 'draft_saved'); assert.equal(job.attempts, 1); assert.ok(job.draftReceipt?.id); assert.equal(job.remoteId, null); assert.equal(job.remoteUrl, null); }
   assert.ok(!JSON.stringify(state).includes('fixture-only-secret')); assert.equal((await listOperations(draft.id)).every(operation => operation.status === 'succeeded'), true);
   const repeated = z.array(z.object({ id: z.uuid() })).parse(await post(`drafts/${approved.id}/save-drafts`, deliveryInput)); assert.deepEqual(repeated, operations); assert.equal(await runWorkerOnce(), false); assert.equal(draftWrites, 3);
-  console.log(JSON.stringify({ workspaceId, isolated: true, docker: true, realSupabase: true, realPgmq: true, fixtureModelAndResearch: true, immutableKnowledgeSources: 3, discoveryPromotions: 1, retryAttempts: completed.attempt, masterGenerations: masters, verifiedLocalRevision: true, frozenKnowledgeReused: true, adapterDraftReceipts: 3, duplicateWrites: 0, publicPosts: 0, realPlatformAcceptance: false }));
+  console.log(JSON.stringify({ workspaceId, isolated: true, docker: true, kubernetes: process.env.STUDIO_ORCHESTRATOR === 'kubernetes', realSupabase: true, realPgmq: true, fixtureModelAndResearch: true, immutableKnowledgeSources: 3, discoveryPromotions: 1, retryAttempts: completed.attempt, masterGenerations: masters, verifiedLocalRevision: true, articleExportOperations: exports.length, frozenKnowledgeReused: true, adapterDraftReceipts: 3, duplicateWrites: 0, publicPosts: 0, realPlatformAcceptance: false }));
+  // New task-policy acceptance uses the same isolated workspace and transport.
+  // It cannot publish: the three native targets have no official public adapter.
+  const { defaultBrandProfile } = await import('../src/contracts/brand.ts');
+  const { taskInputSchema: configSchema } = await import('../src/core/task-model.ts');
+  configureTaskRuntime({
+    research: async () => ({ sources: [publicSource], warnings: [] }),
+    generateMaster: async (_brief, instruction) => { assert.match(instruction, /Content Studio brand profile/u); return { title: 'Branded software fixture', body: 'Fixture source: https://www.w3.org/' }; },
+    adaptMaster: async (_brief, _master, platform, instruction) => { assert.match(instruction, /Content Studio brand profile/u); return { platform, format: 'article', title: 'Branded software fixture', text: 'Fixture source: https://www.w3.org/', tags: [], mediaPaths: [] }; },
+  });
+  const autoConfig = configSchema.parse({ title: 'Automatic brand fixture', prompt: 'Explain a permitted software workflow using supplied fixture sources.', model: 'ecosystem-fixture-model', platforms: [...platforms], kind: 'content', topicOrigin: 'editorial', sources: [publicSource], brand: defaultBrandProfile, frequency: { type: 'once', time: '09:00', timezone: 'UTC' }, enabled: true, delivery: { mode: 'automatic', accountIds, authorized: true, publicationTime: '18:00', dayOffset: 0, onceAt: new Date(Date.now() + 3600000).toISOString() } });
+  const autoTask = await createTask(autoConfig); assert.ok(autoTask.authorization);
+  process.env.STUDIO_WORKER_ROLE = 'article'; const autoRun = await enqueueTaskRun(autoTask.id);
+  for (let index = 0; index < 20 && await runWorkerOnce(); index++) { /* Isolated article/export work only. */ }
+  const autoCompleted = await getTaskRun(autoRun.id); assert.equal(autoCompleted.status, 'succeeded'); assert.equal(autoCompleted.warnings.length, 3); assert.deepEqual(autoCompleted.taskSnapshot.brand, defaultBrandProfile);
+  process.env.STUDIO_WORKER_ROLE = 'delivery';
+  for (let index = 0; index < 20 && await runWorkerOnce(); index++) { /* Three native drafts, no public posts. */ }
+  assert.equal(draftWrites, 6); assert.equal((await readState()).jobs.length, 6);
+  process.env.STUDIO_WORKER_ROLE = 'article'; await enqueueWork('task_run', autoRun.id);
+  for (let index = 0; index < 20 && await runWorkerOnce(); index++) { /* Repair must reuse the original jobs. */ }
+  process.env.STUDIO_WORKER_ROLE = 'delivery'; assert.equal(await runWorkerOnce(), false); assert.equal(draftWrites, 6);
+  const revokedRun = await enqueueTaskRun(autoTask.id);
+  const revoked = await updateTask(autoTask.id, { ...autoConfig, enabled: false }); assert.equal(revoked.authorization, undefined);
+  process.env.STUDIO_WORKER_ROLE = 'article';
+  for (let index = 0; index < 20 && await runWorkerOnce(); index++) { /* Old frozen grant cannot authorize a new write. */ }
+  assert.ok((await getTaskRun(revokedRun.id)).warnings.some(warning => /revoked or changed/u.test(warning)));
+  process.env.STUDIO_WORKER_ROLE = 'delivery'; assert.equal(await runWorkerOnce(), false); assert.equal(draftWrites, 6);
+  const lateTask = await createTask({ ...autoConfig, delivery: { ...autoConfig.delivery!, onceAt: new Date(Date.now() - 60000).toISOString() } });
+  const lateRun = await enqueueTaskRun(lateTask.id); process.env.STUDIO_WORKER_ROLE = 'article';
+  for (let index = 0; index < 20 && await runWorkerOnce(); index++) { /* Missed publication times never catch up. */ }
+  assert.ok((await getTaskRun(lateRun.id)).warnings.some(warning => /missed/u.test(warning)));
+  assert.equal((await readState()).jobs.length, 6); assert.equal(draftWrites, 6);
+  console.log(JSON.stringify({ taskAutomation: true, brandSnapshot: true, nativeDraftFallbacks: 3, revokedGrantBlocked: true, missedTimeBlocked: true, duplicateWrites: 0, publicPosts: 0 }));
+  if (process.argv.includes('--confirm-interactive-fixture')) await (await import('./workflow-web-fixture.ts')).awaitWorkflowWebFixture(directory, workspaceId);
+  // Exercise the already-supported API adapter with deterministic HTTP responses.
+  // Only requests to the fixture origin are intercepted; nothing reaches Postiz.
+  let providerPosts = 0; let loseResponse = false;
+  process.env.POSTIZ_API_KEY = 'isolated-fixture-only'; process.env.POSTIZ_BASE_URL = 'https://postiz-fixture.invalid/public/v1';
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.hostname !== 'postiz-fixture.invalid') return originalFetch(input, init);
+    if (url.pathname.endsWith('/integrations')) return Response.json([{ id: 'auto-integration', name: 'Fixture account', identifier: 'linkedin', disabled: false }]);
+    if (url.pathname === '/public/v1/posts' && init?.method !== 'POST') return Response.json({ posts: [{ id: 'fixture-post-1', content: 'Scheduled API fixture. Source: https://www.w3.org/', publishDate: new Date().toISOString(), releaseURL: 'https://www.linkedin.com/feed/update/urn:li:activity:123456789/', state: 'PUBLISHED', integration: { id: 'auto-integration', providerIdentifier: 'linkedin' } }] });
+    assert.equal(url.pathname, '/public/v1/posts'); assert.equal(init?.method, 'POST'); providerPosts++;
+    if (loseResponse) throw new TypeError('Intentional fixture response loss');
+    return Response.json([{ postId: `fixture-post-${providerPosts}`, integration: 'auto-integration' }]);
+  };
+  const linkedInId = randomUUID();
+  await mutateState(state => { state.paused = false; state.accounts.push({ id: linkedInId, platform: 'linkedin', provider: 'postiz', integrationId: 'auto-integration', label: 'Fixture API account', status: 'connected', note: 'Isolated fixture', verifiedAt: new Date().toISOString() }); });
+  configureTaskRuntime({ research: async () => ({ sources: [publicSource], warnings: [] }), generateMaster: async () => ({ title: 'API fixture', body: 'Source: https://www.w3.org/' }), adaptMaster: async (brief, _master, platform) => ({ platform, format: 'text', title: brief.topic, text: `${brief.topic}. Source: https://www.w3.org/`, tags: [], mediaPaths: [] }) });
+  const { runDueJobs } = await import('../src/core/pipeline.ts');
+  const generateAutomatic = async (title: string) => {
+    const config = configSchema.parse({ ...autoConfig, title, platforms: ['linkedin'], delivery: { ...autoConfig.delivery!, accountIds: [linkedInId], onceAt: new Date(Date.now() + 5000).toISOString() } });
+    const task = await createTask(config); const run = await enqueueTaskRun(task.id); process.env.STUDIO_WORKER_ROLE = 'article';
+    for (let index = 0; index < 20 && await runWorkerOnce(); index++) { /* Production + exports. */ }
+    const completed = await getTaskRun(run.id); assert.equal(completed.status, 'succeeded'); assert.deepEqual(completed.warnings, []);
+    const job = (await readState()).jobs.find(item => item.draftId === completed.draftId)!; assert.ok(job?.automation); assert.equal(job.automation.authorizationId, task.authorization!.id);
+    return { task, config, job };
+  };
+  const scheduled = await generateAutomatic('Scheduled API fixture');
+  assert.equal((await runDueJobs()).length, 0); assert.equal(providerPosts, 0);
+  await delay(Math.max(0, Date.parse(scheduled.job.scheduledAt) - Date.now() + 30));
+  await runDueJobs(); assert.equal(providerPosts, 1); assert.equal((await readState()).jobs.find(job => job.id === scheduled.job.id)?.status, 'queued');
+  await runDueJobs(); assert.equal(providerPosts, 1);
+  const { reconcileJob } = await import('../src/core/pipeline.ts');
+  assert.equal((await reconcileJob(scheduled.job.id)).status, 'published');
+  const revokePublic = await generateAutomatic('Revoked API fixture');
+  await updateTask(revokePublic.task.id, { ...revokePublic.config, enabled: false });
+  await mutateState(state => { state.jobs.find(job => job.id === revokePublic.job.id)!.scheduledAt = new Date(Date.now() - 1).toISOString(); });
+  await runDueJobs(); assert.equal(providerPosts, 1); assert.equal((await readState()).jobs.find(job => job.id === revokePublic.job.id)?.status, 'failed');
+  const uncertain = await generateAutomatic('Unknown API fixture'); loseResponse = true;
+  await delay(Math.max(0, Date.parse(uncertain.job.scheduledAt) - Date.now() + 30));
+  await runDueJobs(); assert.equal(providerPosts, 2); assert.equal((await readState()).jobs.find(job => job.id === uncertain.job.id)?.status, 'needs_reconciliation');
+  await runDueJobs(); assert.equal(providerPosts, 2);
+  console.log(JSON.stringify({ scheduledApiFixture: true, submissionRequests: providerPosts, replayRequests: 0, revokedPublicSubmissionBlocked: true, unknownSubmissionNotRetried: true, realExternalPublications: 0 }));
+  globalThis.fetch = originalFetch;
 } finally {
+  globalThis.fetch = originalFetch;
   socket?.terminate(); if (bridgeStarted) await bridge.close(); server.closeAllConnections(); await new Promise<void>(accept => server.close(() => accept()));
   const cleanupFailures: string[] = [];
   for (let index = 0; index < 30; index++) { const claim = z.object({ msgId: z.number(), token: z.uuid() }).nullable().parse(await dbRpc('studio_claim_role_work', { p_workspace: workspaceId, p_role: 'all' }).catch(() => null)); if (!claim) break; await dbRpc('studio_ack_work', { p_workspace: workspaceId, p_msg: claim.msgId, p_token: claim.token }).catch(() => { cleanupFailures.push('fixture_queue'); }); }
-  for (const table of ['studio_discovery_promotions', 'studio_run_events', 'studio_task_runs', 'studio_tasks', 'studio_operations', 'studio_revisions', 'studio_editor_state', 'studio_account_execution_leases', 'studio_queue_leases', 'content_studio_workspaces']) {
+  for (const table of ['studio_discovery_promotions', 'studio_run_events', 'studio_task_runs', 'studio_tasks', 'studio_video_projects', 'studio_operations', 'studio_revisions', 'studio_editor_state', 'studio_account_execution_leases', 'studio_queue_leases', 'studio_article_commands', 'content_studio_workspaces']) {
     const path = `${table}?${table === 'content_studio_workspaces' ? 'id' : 'workspace_id'}=eq.${workspaceId}`;
     try { await dbRequest(path, { method: 'DELETE' }); assert.deepEqual(await dbRequest(path), []); } catch { cleanupFailures.push(table); }
   }

@@ -60,7 +60,7 @@ async function runCodex(binary: string, directory: string, schemaPath: string, r
 }
 export async function generateContent(input: Brief): Promise<Generated> {
   const brief = briefSchema.parse(input);
-  if (brief.knowledgeIds?.length) throw new Error('Knowledge-backed generation requires a task run with a frozen LocalFS evidence snapshot. Create a task and select its knowledge sources.');
+  if (brief.knowledgeIds?.length || brief.evidenceDocumentIds?.length) throw new Error('Knowledge-backed generation requires a task run with a frozen LocalFS evidence snapshot. Create a task and select its knowledge sources.');
   if (new Set(brief.platforms).size !== brief.platforms.length) throw new Error('Requested platforms must be unique.');
   if (process.env.STUDIO_MODEL_EXECUTOR_URL) {
     const { runStructuredGeneration } = await import('./generation-engine.ts');

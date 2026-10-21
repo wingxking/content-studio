@@ -7,6 +7,7 @@ import { dataDirectory } from './store.ts';
 
 export async function resolveMediaLocation(input: string): Promise<string> {
   if (input.startsWith('studio-asset:')) return resolveAssetPath(z.uuid().parse(input.slice('studio-asset:'.length)));
+  if (input.startsWith('studio-article-media:')) return resolveMediaLocation(await (await import('./article-media.ts')).originalArticleMedia(input));
   const alias = await assetStore().resolveAlias(input); if (alias) return alias;
   const original = resolve(input);
   let relocation: string;

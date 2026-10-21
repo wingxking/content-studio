@@ -34,7 +34,13 @@ export async function dbRequest(path: string, options: DatabaseOptions = {}): Pr
       signal: AbortSignal.any([AbortSignal.timeout(30000), ...databaseRequestSignal() ? [databaseRequestSignal()!] : []]), redirect: 'error',
     });
   } catch { throw new Error('Supabase request failed; check local service health.'); }
-  if (!response.ok) throw new Error(`Supabase request failed (HTTP ${response.status}).`);
+  if (!response.ok) {
+    const failure: unknown = await response.json().catch(() => null);
+    if (failure && typeof failure === 'object' && 'message' in failure && failure.message === 'Research model budget exhausted') throw new Error('Quality withheld: model call budget exhausted; completed checkpoints are preserved.');
+    const conflict = response.status === 409 || failure && typeof failure === 'object' && 'code' in failure && failure.code === 'P0001' && 'message' in failure && typeof failure.message === 'string' && /changed|ownership|lease|active.*submission|reconcile.*before/iu.test(failure.message);
+    if (conflict) throw new Error('Content revision or execution ownership changed. Refresh and review before retrying.');
+    throw new Error(`Supabase request failed (HTTP ${response.status}).`);
+  }
   if (response.status === 204) return null;
   const text = await response.text();
   return text ? JSON.parse(text) as unknown : null;

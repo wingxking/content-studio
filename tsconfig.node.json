@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ]
+  },
+  "exclude": ["tests/studio-extension.integration.mts"],
+  "include": [
+    "src/core",
+    "src/server",
+    "src/application",
+    "src/contracts",
+    "tests",
+    "vite.config.ts"
+  ]
+}

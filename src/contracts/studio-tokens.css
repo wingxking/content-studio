@@ -1,0 +1,13 @@
+:root {
+  --studio-brand: #315bcf;
+  --studio-ink: #172a47;
+  --studio-muted: #52647b;
+  --studio-line: #dee5ee;
+  --studio-surface: #ffffff;
+  --studio-background: #edf2f8;
+  --studio-success: #217454;
+  --studio-warning: #865b16;
+  --studio-danger: #a32f42;
+  --studio-radius: 12px;
+  --studio-focus: #315bcf;
+}

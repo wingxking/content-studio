@@ -1,5 +1,13 @@
 # Architecture and staged delivery
 
+当前单实例升级与验收记录见 [2026-10-19 统一环境](unified-runtime-2026-10-19.zh-CN.md)。当前入口为 `http://127.0.0.1:4310`；旧隔离验收地址仅为历史记录。
+
+最新品牌、任务授权与双时间交付复核见 [2026-10-17 升级记录](automation-brand-review-2026-10-17.zh-CN.md)；实现与真实平台准入分别验收。
+
+The 2026-10-15 implementation adds the [article workflow and multi-target video boundaries](workflow-kubernetes-video-implementation.zh-CN.md) and a [gated OrbStack Kubernetes application runtime](orbstack-kubernetes.zh-CN.md). Supabase/pgmq/pg_cron stay in Compose. This supersedes the historical native-worker/Storage-copy choices below; runtime activation and live platform acceptance are recorded separately.
+
+The subsequent [workflow review](review-workflow-2026-10-15.zh-CN.md) tightens adopted-release rollback, pure media metadata queries and unsaved-edit approval/navigation guards without changing stored IDs, legacy files or approval hash algorithms.
+
 Historical baseline: current implementation evidence is in [local system delivery](local-system-delivery.zh-CN.md). The latest requested Docker/LocalFS/independent-video target and migration gates are in [dual-pipeline architecture](docker-dual-pipeline-architecture.zh-CN.md); that target supersedes the older planned Storage/native-worker choices below.
 
 Decision date: 2026-10-10, Asia/Singapore. See [verified progress and architecture in Chinese](progress-and-architecture.zh-CN.md) for current implementation and live-acceptance boundaries.
@@ -68,3 +76,7 @@ Stage one must first implement and verify a single-owner relational Supabase mod
 ## Planned Web workflow extension
 
 The 2026-10-10 proposal adds separate master/channel revisions, safe propagation of master updates, job-scoped Web AI instructions, discovery schedules and question runs, asset references, and manually created video projects. These changes have not been implemented. See [product design](web-product-design.zh-CN.md), [technical architecture](web-technical-architecture.zh-CN.md), and [official workflow research](research-web-workflows-2026-10-10.zh-CN.md). The existing live-publishing acceptance gate remains in force before stage-two implementation.
+
+## Task workbench read model (2026-10-19)
+
+The task-first navigation, stable article origins, explicit derived-task relations, per-account V2 delivery policy, durable delivery batches and isolated companion UI channel are described in [the implementation record](task-workbench-delivery-2026-10-19.zh-CN.md). Existing business revisions, media identities, pgmq ownership and V1 companion execution journals remain authoritative.

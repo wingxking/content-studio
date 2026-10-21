@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { type Draft, draftSchema } from './model.ts';
-import { dataDirectory } from './store.ts';
+import { dataDirectory, storageMode } from './store.ts';
+import { dbRequest } from './database.ts';
 
 export function draftDirectory(id: string): string { return join(dataDirectory(), 'content', z.uuid().parse(id)); }
 
@@ -17,7 +18,7 @@ async function completedTemporaryFile(path: string, content: string): Promise<st
   finally { await file.close(); }
   return temp;
 }
-async function atomicFile(path: string, content: string): Promise<void> {
+export async function atomicFile(path: string, content: string): Promise<void> {
   const temp = await completedTemporaryFile(path, content);
   try { await rename(temp, path); }
   finally { await rm(temp, { force: true }); }
@@ -45,9 +46,11 @@ async function immutableFile(path: string, name: string, content: string): Promi
   } finally { await rm(temp, { force: true }); }
 }
 
-export async function writeDraftArtifacts(draft: Draft): Promise<void> {
+export async function writeDraftArtifacts(draft: Draft, exporterVersion = 1): Promise<void> {
+  z.number().int().min(1).max(1000).parse(exporterVersion);
   const root = draftDirectory(draft.id);
-  const revision = join(root, `revision-${draft.revision}`);
+  const revisionRoot = join(root, `revision-${draft.revision}`);
+  const revision = exporterVersion === 1 ? revisionRoot : join(revisionRoot, 'exports', `v${exporterVersion}`);
   await mkdir(revision, { recursive: true, mode: 0o700 });
   const files: Record<string, string> = {
     'master.md': `# ${draft.title}\n\n${draft.document ? articleMarkdown(draft.document) : draft.body}\n`,
@@ -81,6 +84,11 @@ export async function writeDraftArtifacts(draft: Draft): Promise<void> {
 }
 
 export async function readDraftRevision(id: string, revision: number): Promise<Draft> {
+  z.uuid().parse(id);
   z.number().int().positive().parse(revision);
+  if (storageMode() === 'supabase') {
+    const rows = z.array(z.object({ content: draftSchema })).parse(await dbRequest(`studio_revisions?workspace_id=eq.${z.uuid().parse(process.env.STUDIO_WORKSPACE_ID)}&draft_id=eq.${id}&revision=eq.${revision}&limit=1`));
+    if (rows[0]) return rows[0].content;
+  }
   return draftSchema.parse(JSON.parse(await readFile(join(draftDirectory(id), `revision-${revision}`, 'content.json'), 'utf8')));
 }

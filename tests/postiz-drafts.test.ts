@@ -5,6 +5,7 @@ import { createServer, type ServerResponse } from 'node:http';
 import { test } from 'node:test';
 import { accountSchema, jobSchema, type Account, type Variant } from '../src/core/model.ts';
 import { RejectedPublishError, savePostizDraft, submitPostiz, UncertainPublishError, type Integration } from '../src/core/postiz.ts';
+import { DeliveryInputError } from '../src/core/delivery-errors.ts';
 
 type RecordedRequest = { method: string | undefined; url: string | undefined; authorization: string | undefined; body: unknown };
 const date = '2026-10-13T00:00:00.000Z';
@@ -75,10 +76,10 @@ test('draft staging rejects mismatched accounts, disabled integrations, media an
       await assert.rejects(savePostizDraft(publication, target, variant(), invalid), /match the selected/);
     }
     await assert.rejects(savePostizDraft(publication, target, { ...variant(), platform: 'reddit' }, integration()), /match the selected/);
-    await assert.rejects(savePostizDraft(publication, target, { ...variant(), mediaPaths: ['/private/image.png'] }, integration()), /media upload is not configured/);
+    await assert.rejects(savePostizDraft(publication, target, { ...variant(), mediaPaths: ['/private/image.png'] }, integration()), /媒体上传/);
     await assert.rejects(savePostizDraft(publication, target, { ...variant(), text: 'A'.repeat(300) }, integration()), /280/);
     const reddit = { ...target, platform: 'reddit' as const };
-    await assert.rejects(savePostizDraft(job(reddit), reddit, { ...variant(), platform: 'reddit' }, { ...integration(), identifier: 'reddit' }), /explicit subreddit/);
+    await assert.rejects(savePostizDraft(job(reddit), reddit, { ...variant(), platform: 'reddit' }, { ...integration(), identifier: 'reddit' }), error => error instanceof DeliveryInputError && error.code === 'AUTHORIZATION_REQUIRED');
     assert.equal(requests.length, 0);
   });
 });

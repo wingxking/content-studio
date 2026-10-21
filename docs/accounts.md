@@ -1,5 +1,38 @@
 # Account setup and operating identity
 
+## 当前草稿连接续接：2026-10-21
+
+品牌插件到现有工作台的私密配对迁移已成功，桥接已连接当前 Content Studio 扩展；历史平台账号绑定和所有未知记录保留，没有将新身份覆盖到旧账号。
+
+插件已原位升级至 2.0.13，旧“文章同步助手”已停用并保留存储。重新加载后工作台连接恢复，本地文档处理自检通过。最终只读检查：知乎返回稳定身份；公众号返回 `identity_incomplete`（没有稳定用户 ID，不能绑定或写入）；B站未登录。公众号和 B站需要所有者在指定 Chrome 资料内登录、扫码或验证，再回工作台核对。
+
+只读核对确认：当前知乎 `ziv` 的稳定用户 ID 与 2026-10-17 原隔离未知任务的预期 ID 一致；它与主工作区“孔涛”保存的稳定用户 ID **不同**，所以不能当作仅昵称变化。主工作区原账号不自动改绑为 ziv。
+
+已分别检查知乎原生草稿管理、文章管理和编辑器入口。空编辑器可打开，但草稿／文章管理页面均显示“如何开通创作者中心”的资格引导，尚不能读取目标原稿。原任务 `a2f6e608-d9a6-4d3d-9c09-cd807d2fecae` 仍为 needs_reconciliation，attempts=1，未重发。核对标题为“Content Studio 私密草稿验收 · 请勿发布”。不能把首页草稿箱的 0 或当前空编辑器当作原稿未创建的证据。
+
+仍需要所有者完成：在 ziv 的原生知乎界面处理创作者中心准入并访问原草稿，找到后核对正文并提供实际编辑链接；若今后继续使用主工作区原“孔涛”账号，需在指定 Chrome profile 恢复该账号登录，不能用 ziv 覆盖旧绑定。不要为开通资格公开发表测试稿，也不要清空 journal 后重发。
+
+新版恢复链路详见 [插件核对 Coding Spec](plugin-recovery-coding-spec-2026-10-21.zh-CN.md)：工作台登记 operator_verified 原回执后，可同步给插件解除对应记录；原请求、账号和回执必须匹配。来自隔离工作区的记录需回到原工作区处理，主工作区不会静默吞并。
+
+以下 2026-10-19 等内容保留为历史记录，当前连接以上述续接状态为准。
+
+## Current k runtime and draft connection: 2026-10-19
+
+The single active workbench is `http://127.0.0.1:4310`, Kubernetes namespace `content-studio-k8s` on OrbStack. The old isolated `15731` instance and fixture namespaces have been retired. Original accounts and delivery records are preserved; production schedules and public publication remain paused. See [unified runtime acceptance](unified-runtime-2026-10-19.zh-CN.md).
+
+The official YouTube video adapter is available in the current capability response. The article draft bridge is configured but **disconnected**: the saved bridge/account binding refers to the earlier extension installation, while the current Content Studio installation has a different extension ID. The owner profile `radarxai@gmail.com` was visibly verified, and its Content Studio popup shows one task awaiting reconciliation. That real private-draft attempt belongs to the retained isolated workspace `41922e10-5637-474c-af02-644450b92f9a`, not the six delivery records in the main workspace. No saved pairing, account binding or submission record was changed during this review. Browser login alone does not repair this mismatch.
+
+The read-only Zhihu check showed current public profile `ziv` at `/people/radarx`, while the earlier recorded target was `孔涛` at `/people/kong-tao-1-90`. A renamed public profile is possible, so this is an **unconfirmed physical identity**, not proof of a different person. The visible empty draft count for the current profile cannot resolve the older attempt. No draft was opened, edited, saved, deleted or retried. Verify the intended account's stable identity before inspecting or attesting the historical draft.
+
+To restore native article drafts safely:
+
+1. Verify whether the current Zhihu profile is the same stable identity as the recorded target. Then inspect the original isolated job `a2f6e608-d9a6-4d3d-9c09-cd807d2fecae` and that account's draft list for `Content Studio 私密草稿验收 · 请勿发布`. Preserve the attempt journal; if found, record the supported actual draft ID and credential-free editor URL through draft reconciliation. If no conclusive result is available, retain `needs_reconciliation` and review recovery evidence rather than recording an invented failure or retrying. The main workbench does not silently merge isolated jobs into its six-record queue.
+2. After the uncertain delivery is resolved, keep the installed unpacked extension directory stable (`extension/artifacts/content-studio-v1/dist` for this installation). Use the current Docker-verified build; moving the directory can change the extension ID again.
+3. In the verified Chrome profile, open extension settings and Studio → Settings → Accounts → Platform draft connection. Pair the current installation privately, then set its generated local server address. Keep tokens and the full private URL out of reports and Git.
+4. Refresh **only the selected platform**, verify its actual user identity, and bind that same existing account. A new remote draft and its editor receipt still need account-specific acceptance; public publication remains a separate human action.
+
+Until this migration is complete, current article accounts use copy/export and manual platform publication. The UI derives this from the live connection state rather than the historical successful login below.
+
 Required identity: **Chrome profile `radarxai@gmail.com`** for Google sign-in, Supabase, debugging, and platform test accounts when Google is supported. Verify the visible Chrome profile before account operations. Use another identity only after explicit user direction.
 
 **Owner-directed exception, 2026-10-15:** Codex/OpenAI authorization uses Chrome profile **`zill.xkk@gmail.com`**, visibly verified before the successful OAuth flow. The owner confirmed the selected existing OpenAI account was the same account after an email change. This exception applies to Codex authorization; retain the verified radar profile for the other platform operations above. Do not reproduce an earlier private account alias.
@@ -234,3 +267,58 @@ Use `npm run local:setup`, `npm run local:start` and `npm run local:status`; see
 ## Computer Use restriction
 
 Opening the WeChat Official Account portal ended the Computer Use session with an explicit disallowed-URL message. Browser operations were stopped; no attempt was made to bypass the restriction. The user must operate that portal directly or supply a separately permitted official integration. This session did not complete WeChat login, draft creation or publication. Other uninspected account routes remain unverified.
+
+## 多目标视频接入边界（2026-10-15）
+
+- 同一个独立视频项目可以保存 YouTube 与B站的不同账号、文案和审批，复用同一成片；横竖版分开渲染。私密或不公开 YouTube 上传不计为公开发布。
+- B站视频自动上传当前关闭：尚无本项目经验证的官方投稿适配器及应用授权。专栏草稿账号连接仅用于文章，不能解锁视频上传。操作者需在[哔哩哔哩开放平台](https://open.bilibili.com/)取得适用投稿权限，核实应用/账号范围及正式接口契约，再增加适配器、凭证私有挂载和隔离验收。目前在视频工作区下载成片、字幕，复制对应文案后进入原生投稿页；不使用猜测的非官方接口。
+- Kubernetes fixture 的模型容器故意没有真实授权，readiness 显示不可用且 liveness 正常；这不能作为原工作区授权失效的结论。原工作区的模型授权、YouTube OAuth 与草稿桥应在切换后分别核验，不复制到 fixture，也不写入 ConfigMap。
+
+## 本项目扩展草稿协议 v1 验收边界（2026-10-15）
+
+本轮仅适配公众号、知乎、B站专栏。已通过真实网关和扩展代码的夹具往返，以及真实 Supabase/pgmq 的隔离工作区执行；这没有重新核验个人 Chrome 的三平台登录，也没有新增真实平台草稿。历史官方扩展验收不能替代本项目适配版验收。
+
+待完成真实验收的操作步骤：按既有 K8s 发布流程更新同一版本的 API、delivery worker、draft-bridge；在设备 k 的 Chrome 可见核对 `radarxai@gmail.com` 资料；加载新构建的 `extension/dist/`，取得新扩展 ID 与 Token，在 Studio 配对并粘贴私密连接地址；依次选择公众号、知乎、B站刷新真实用户 ID，核对目标账号后授权草稿保存；用单独的测试文章逐一保存并打开原生编辑器核对 ID、正文、图片和封面。登录、扫码、验证码或 MFA 由账号所有者完成，不导出 Cookie。结果不明的任务先对账，禁止重发。详细说明见 [扩展执行端](extension-draft-executor.zh-CN.md)。
+
+本轮验证没有替换运行中 `content-studio:20261015-review-v9` 的 K8s 应用，没有新增公开发布授权。
+
+## 2026-10-17 自动发布权限复核
+
+只读在线能力：公众号和B站尚未登记可用账号；知乎可保存草稿，三者均无自动公开能力。
+
+- 修改版扩展的操作流程（本轮已加载并配对隔离工作区）：在设备 k 的 `radarxai@gmail.com` Chrome profile 加载 `extension/artifacts/content-studio-v1/dist/`。它需要网站和登录态访问；通过电脑操作工具加载前须完成当次权限确认。随后在本地工作台私密配对，逐个平台核验真实用户 ID，使用隔离文章保存一次并打开原生编辑器检查正文、图片和封面。不要把 Token/配对 URL 发到聊天。
+- 公众号：由管理员在后台核验账号主体及实际草稿/发布接口权限；未取得官方权限前只做草稿。
+- 知乎：从官方 `https://www.zhihu.com/playground/zhihu-publisher` 申请测试资格，按 `https://github.com/zhihu/ZhihuPublisher` 的正式说明配置私有凭证，并核验预览确认及发布/结果查询契约。现有 Chrome 登录不等于 OpenAPI 授权，不发送密钥到聊天。
+- B站专栏：在 `https://openhome.bilibili.com/doc` 完成身份和应用审核、接受账号授权，核验专栏发布和查询的正式契约；视频权限另行核验。
+
+未获权限时自动任务请求送草稿并显示待人工发布。没有真实远端标识和作品 URL 不登记公开成功；结果不明先对账。
+
+
+### 本轮真实验收结果与下一步
+
+- 修改版 ID `ocmaklkebfcdiamgpklonpcbcffcnjmp` 已加载并完成独立工作区私密配对；原扩展和在线 v9 工作区未替换。Chrome 设置中的 Token 和服务器地址均隐藏；拒绝了密码管理器保存提示。新设置按钮“检查本地草稿环境”真机通过，不向平台发送内容。
+- 知乎：可见账号与扩展身份匹配。隔离工作区 `41922e10-5637-474c-af02-644450b92f9a` 的任务 `a2f6e608-d9a6-4d3d-9c09-cd807d2fecae` 为 `needs_reconciliation`。先在该账号原生专栏草稿管理内寻找标题“Content Studio 私密草稿验收 · 请勿发布”；存在时核对正文，再在 Studio 记录实际草稿 ID 与不含凭据的编辑器 URL。创作者入口本轮显示开通引导，没有获得可核验回执；没有重发，也不要用新工作区或新扩展绕开写入屏障。若无法找到，保持待对账，另行审阅平台结果与恢复依据。
+- 公众号：新扩展未识别已登录账号。管理员需在指定 Chrome 资料内完成公众号后台登录/扫码，并核验目标公众号身份，再刷新该平台并授权草稿保存。本轮未创建公众号草稿。
+- B站：新扩展未识别已登录账号。所有者需在指定 Chrome 资料内登录目标账号，打开专栏投稿页，再刷新 B站身份并授权草稿保存。本轮未创建B站草稿；这不建立视频投稿权限。
+- 原生验收会话使用 `14411`/`19528`，私密配置和执行日志保存在忽略的 `.docker-k-acceptance/acceptance/native-draft/`；正式实例仍是 `4310`/`19527`。隔离会话停止后 URL 不在线，保留数据库状态与日志供对账；不要将配置或执行日志上传到 Git。48 小时隔离稳定性测试是另一独立容器，仍在运行且未完成。
+
+## 2026-10-19 任务工作台与插件 2.0.10
+
+安装包及对应源码包已更新到工作台下载入口，原固定解压安装目录文件同步为 2.0.10。Chrome 原生窗口自动化读取超时，本轮未确认浏览器实际已重载新版，也未迁移配对。原账号身份差异与待对账草稿仍按上文处理。
+
+操作人先在 Chrome 核对 `radarxai@gmail.com` 配置，进入 `chrome://extensions`，在现有 Content Studio 条目点击重新加载，核对版本 2.0.10；不要删除条目或清空扩展存储。新版入口固定为“采集 / 任务 / 账号”。核对旧任务和平台回执后再处理配对 ID 差异，不重发未知提交。源码包解压构建、52 项插件单测及 8 项模拟平台的实际桥接链路均通过，这些结果不代替当前账号的真实平台验收。
+
+### 2026-10-21 品牌插件更新与配对迁移边界
+
+指定 Chrome profile 已核对为 `radarxai@gmail.com`。Content Studio 插件 **2.0.12** 已实际激活，并通过插件内“已替换文件，重新加载”再次核验；重载前后的待核对记录保护仍然存在。插件能明确显示旧测试端口离线、自动重试和草稿写入暂停，不再无限显示“正在连接”。没有执行平台写入、清除执行日志或重装扩展。
+
+当前工作台的草稿桥仍绑定旧“文章同步助手”扩展，品牌 Content Studio 是不同的扩展 ID，且它保留旧测试连接和待核对记录。**本次软件更新没有完成扩展身份迁移，也没有恢复品牌插件的真实草稿写入。** 工作台显示已登记的平台账号不证明新插件已获得对应草稿能力。
+
+操作顺序：
+
+1. 保留两个扩展的执行记录和现有工作台交付屏障，先在原平台与原交付记录核对未知结果；不要为了连接成功删除、重装或清空日志。
+2. 只有确认要迁移扩展身份后，使用品牌插件“连接设置”中的扩展 ID 与配对 Token，在工作台“设置 → 平台与账号”保存配对；再将该配对生成的私密连接地址粘贴回插件。不得只把旧地址端口改成当前端口后视为迁移成功。
+3. 工作台与插件均显示连接成功后，逐个平台核对实际身份并明确启用草稿保存；旧扩展 ID 的绑定不能自动视为新扩展授权。
+4. 未知或损坏的 journal 会持续阻止新草稿写入。2.0.12 允许空闲时修复连接或更新并保留记录，不提供“清空日志恢复”的快捷入口；不能在缺少权威回执的情况下自动关闭未知结果。
+
+本轮只验证软件与恢复保护，不新增任何平台公开发布验收。商店自动更新仍需要本产品完成 Chrome Web Store 发布；当前已解压安装需要替换原目录并重载，支持版本提示和安全重载。

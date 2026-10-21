@@ -21,6 +21,25 @@ test('unavailable dependencies stay blocked and errors disclose no raw values', 
   for (const error of ['Bearer sk-secret private body', '/Users/person/file.md source excerpt', 'access_token=secret', 'Supabase failed token=secret']) assert.doesNotMatch(safeRuntimeError(error) ?? '', /secret|Bearer|\/Users|excerpt/u);
   assert.equal(safeRuntimeError(null), null); assert.equal(safeRuntimePhase('randomcredential_saved', 'running'), 'running');
 });
+test('uploaded knowledge is ready without an optional import mount, and accounts do not block creating content', () => {
+  const summary = summarizeRuntimeSetup({ readiness: {}, state: { paused: true, accounts: [] }, bridge: null, knowledge: { configured: true, available: false, importedSources: 2, mountFiles: 0 }, capabilities: [] }, at);
+  const knowledge = summary.steps.find(step => step.id === 'knowledge');
+  assert.equal(knowledge?.status, 'ready'); assert.equal(knowledge?.optional, true);
+  assert.match(knowledge?.detail ?? '', /已有资料可继续用于创作/u);
+  assert.match(knowledge?.detail ?? '', /挂载当前不可访问/u);
+  assert.equal(summary.steps.find(step => step.id === 'accounts')?.optional, true);
+  assert.equal(summary.steps.find(step => step.id === 'database')?.optional, undefined);
+});
+test('scheduler diagnostics distinguish a paused schedule from missing or inconsistent dispatcher jobs', () => {
+  const jobs = [{ name: 'content-studio-task-dispatcher', enabled: false }, { name: 'content-studio-adaptation-repair', enabled: false }];
+  const summarize = (scheduler: Record<string, unknown>) => summarizeRuntimeSetup({ readiness: { scheduler }, state: null, bridge: null, knowledge: null, capabilities: [] }, at);
+  assert.equal(summarize({ ready: false, jobs }).schedulerEnabled, false);
+  assert.equal(summarize({ ready: true, jobs: jobs.map(job => ({ ...job, enabled: true })) }).schedulerEnabled, true);
+  for (const scheduler of [{ ready: false, jobs: [] }, { ready: false, jobs: jobs.slice(0, 1) }, { ready: false, jobs: [jobs[0], { ...jobs[1], enabled: true }] }]) {
+    const summary = summarize(scheduler); assert.equal(summary.schedulerEnabled, null);
+    assert.match(summary.steps.find(step => step.id === 'delivery')?.detail ?? '', /状态未知，请检查调度服务/u);
+  }
+});
 test('activity preserves task progress, parent-child relations and independent domains', () => {
   const parent = randomUUID(); const child = run(); const article = job({ draftId: child.draft_id }); const video = job({ draftId: null, subject: { kind: 'video', id: randomUUID(), revision: 2 } });
   const summary = summarizeRuntimeActivity({ runs: [child], operations: [], renders: [], jobs: [article, video], paused: true, promotions: [{ childRunId: child.id, parentRunId: parent }] }, at);
@@ -28,6 +47,16 @@ test('activity preserves task progress, parent-child relations and independent d
   assert.equal(summary.items.find(item => item.id === article.id)?.parentId, child.id);
   assert.equal(summary.items.find(item => item.id === video.id)?.kind, 'video_delivery');
   assert.ok(summary.items.filter(item => item.kind.endsWith('delivery')).every(item => item.progress === null)); assert.doesNotMatch(JSON.stringify(summary), /secret-value|article body|\/private/u);
+});
+test('article activity links to the latest evidence refresh rather than the oldest run', () => {
+  const firstRun = run(); const refreshedRun = { ...run(), draft_id: firstRun.draft_id, updated_at: '2026-10-15T01:00:00.000Z' };
+  const publication = job({ draftId: firstRun.draft_id });
+  const operation = { id: randomUUID(), draft_id: firstRun.draft_id, subject_kind: 'article' as const, subject_id: firstRun.draft_id, kind: 'article_export', status: 'succeeded', phase: 'completed', updated_at: refreshedRun.updated_at, error: null, job_id: null };
+  for (const runs of [[refreshedRun, firstRun], [firstRun, refreshedRun]]) {
+    const summary = summarizeRuntimeActivity({ runs, jobs: [publication], operations: [operation], renders: [], paused: true }, at);
+    assert.equal(summary.items.find(item => item.id === publication.id)?.parentId, refreshedRun.id);
+    assert.equal(summary.items.find(item => item.id === operation.id)?.parentId, refreshedRun.id);
+  }
 });
 test('uncertain publication exposes reconciliation only, never submission or retry', () => {
   const unknown = job(); const nativeDraft = job({ provider: 'native', platform: 'wechat', deliveryAction: 'save_draft', status: 'failed', attempts: 1 });

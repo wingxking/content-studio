@@ -1,0 +1,14 @@
+# Build the independent extension and application images first. No live app is started.
+ARG EXTENSION_IMAGE=content-studio-extension:studio-protocol-v1
+ARG STUDIO_IMAGE=content-studio:extension-drafts-v1
+FROM ${EXTENSION_IMAGE} AS extension
+FROM ${STUDIO_IMAGE} AS verification
+USER root
+COPY --from=extension --chown=node:node /extension /app/extension
+COPY --chown=node:node tests /app/tests
+COPY --chown=node:node scripts /app/scripts
+COPY --chown=node:node infra /app/infra
+COPY --chown=node:node tsconfig*.json /app/
+USER node
+WORKDIR /app
+CMD ["npm", "test"]

@@ -76,6 +76,7 @@ export class KnowledgeStore {
     finally { await file.close(); }
   }
   async excerpt(id: string, query = ''): Promise<KnowledgeExcerpt> { const source = await this.get(id); return { ...source, ...excerptWindow(await this.text(source), z.string().max(1000).parse(query)) }; }
+  async readText(id: string): Promise<string> { return this.text(await this.get(id)); }
   async search(query: string): Promise<KnowledgeExcerpt[]> {
     const terms = z.string().trim().min(1).max(200).parse(query).toLocaleLowerCase().split(/\s+/u).filter(Boolean).slice(0, 12);
     const hits: { source: KnowledgeSource; text: string; score: number }[] = [];

@@ -1,0 +1,24 @@
+{
+  "archive": "wechatsync-2.0.9.zip",
+  "sha256": "dfb191decd63a45063c4f6d8f7687745e5ecebe34363792dd6781b657d69fd29",
+  "upstream": "https://github.com/wechatsync/Wechatsync",
+  "publicSourceCommit": "c148882f08c12e4b7f5e9c3a2533fbd660aba409",
+  "version": "2.0.9",
+  "privateAdapters": [
+    "dayu",
+    "douyin",
+    "jianshu",
+    "netease",
+    "smzdm",
+    "sohufocus",
+    "toutiao",
+    "x",
+    "xiaohongshu",
+    "yidian"
+  ],
+  "notes": [
+    "Public modules recovered from version-matched upstream TypeScript.",
+    "Missing adapter implementations reconstructed from the supplied compiled distribution.",
+    "Original binary reference is private/ignored; not loaded by the build."
+  ]
+}

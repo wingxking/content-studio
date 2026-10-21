@@ -1,5 +1,7 @@
 # 本地 Docker、文章与视频双流水线升级方案
 
+2026-10-15 更新：文章五入口、视频多目标及 OrbStack 应用运行已按[实施说明](workflow-kubernetes-video-implementation.zh-CN.md)落地。Supabase／pgmq／pg_cron 仍使用原 Compose；Kubernetes 是可切换的应用运行方式，不改变数据和文件权威。以下保留原架构调研与门槛，实际完成范围以[最新验收](acceptance.md)为准。
+
 调研日期：2026-10-10。项目：Content Studio。本文是本轮需求复核、源码调研和目标架构，不是已部署结果。当前实现以 `2122e43` 为核对基线；升级前重新检查工作区、运行版本和数据。云端只确定可迁移边界，不在本轮实施。
 
 ## 1. 建议结论与实施边界

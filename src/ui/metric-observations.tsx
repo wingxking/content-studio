@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { request, errorMessage, type RunAction } from './api.ts';
-import type { MetricValues } from '../core/metrics.ts';
+import type { MetricValues } from '../contracts/metrics.ts';
 type Observation = { id: string; collected_at: string; values: MetricValues; source: string; anomaly: string | null };
 type Snapshot = { observations: Observation[]; poll: { enabled: boolean; deadline: string; next_at: string; blocked_reason: string | null } | null; attempts: { id: string; status: string; error: string | null }[] };
 export function MetricObservations({ jobId, busy, action }: { jobId: string; busy: boolean; action: RunAction }) {

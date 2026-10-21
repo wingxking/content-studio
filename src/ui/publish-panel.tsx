@@ -1,3 +1,7 @@
+import type { z } from 'zod';
+import { deliveryBatchSchema } from '../contracts/workspace.ts';
+import { writeWorkspace } from '../client/workspace.ts';
+import { useCommandIds } from './workspace-hooks.tsx';
 import { MetricObservations } from './metric-observations.tsx';
 import { useEffect, useState } from 'react';
 import type { Account, Draft, Job, Variant } from '../core/model.ts';
@@ -14,6 +18,8 @@ export function isDraftAccountReady(account: Account, variant?: Variant): boolea
 }
 
 export function PublishPanel({ draft, accounts, jobs, busy, dirty, action }: { draft: Draft; accounts: Account[]; jobs: Job[]; busy: boolean; dirty: boolean; action: RunAction }) {
+  const commands = useCommandIds();
+  const [batchResult, setBatchResult] = useState<z.infer<typeof deliveryBatchSchema> | null>(null);
   const [accountIds, setAccountIds] = useState<string[]>([]); const [privacy, setPrivacy] = useState<'private' | 'unlisted' | 'public'>('private');
   const [madeForKids, setMadeForKids] = useState(false); const [syntheticMedia, setSyntheticMedia] = useState(false);
   const [disclosure, setDisclosure] = useState('本视频由 AI 协助整理脚本并生成配音，信息来源详见正文，请自行核对重要事实。');
@@ -26,7 +32,8 @@ export function PublishPanel({ draft, accounts, jobs, busy, dirty, action }: { d
     {!compatible.length && <p className="hint">当前稿件还没有可选择的账号，请先在“平台与账号”中登记并核验账号。</p>}
     {compatible.some(account => accountIds.includes(account.id) && account.platform === 'youtube') && <section className="youtube-publish-settings"><h3>YouTube 发布设置</h3><label>可见性<select value={privacy} onChange={event => setPrivacy(event.target.value as typeof privacy)}><option value="private">私密 · 仅自己可见</option><option value="unlisted">不公开列出 · 持链接可见</option><option value="public">公开</option></select></label><label className="inline-check"><input type="checkbox" checked={madeForKids} onChange={event => setMadeForKids(event.target.checked)}/>此视频是面向儿童的内容（Made for Kids）</label><label className="inline-check"><input type="checkbox" checked={syntheticMedia} onChange={event => setSyntheticMedia(event.target.checked)}/>包含需要披露的逼真合成或修改内容</label><label>AI 创作披露说明<textarea rows={2} minLength={10} maxLength={1000} value={disclosure} onChange={event => setDisclosure(event.target.value)}/></label><p className="hint">分类：教育 · 默认语言：简体中文。请按视频实际内容核对儿童受众、合成内容和披露说明。</p></section>}
     <button className="primary" disabled={busy || dirty || !accountIds.length || compatible.some(account => accountIds.includes(account.id) && account.platform === 'youtube') && disclosure.trim().length < 10} onClick={() => void action(() => request(`drafts/${draft.id}/publish`, { accountIds, expectedRevision: draft.revision, youtubeSettings: { privacyStatus: privacy, selfDeclaredMadeForKids: madeForKids, containsSyntheticMedia: syntheticMedia, categoryId: '27', defaultLanguage: 'zh-CN', descriptionDisclosure: disclosure } }), '各平台发布任务已创建，请逐个平台查看执行结果或完成操作。')}>授权并发布当前版本到所选账号 →</button>
-    <section className="note-card"><h3>只保存草稿，稍后在平台审核</h3><p>微信公众号、知乎与哔哩哔哩专栏需要先在“平台与账号”连接草稿扩展，并将对应适配稿格式设为文章。X、LinkedIn 和 Reddit 使用 Postiz 审稿草稿，保存在 Postiz，不会写入平台原生草稿箱。</p><button disabled={busy || dirty || !draftAccountsReady} onClick={() => void action(() => request(`drafts/${draft.id}/save-drafts`, { accountIds, expectedRevision: draft.revision }), '草稿保存任务已创建。请查看每个平台的草稿标识与链接，公开发布仍需另行操作。')}>授权并保存当前版本到所选草稿箱</button>{accountIds.length > 0 && !draftAccountsReady && <p className="hint">所选账号中有尚未连接草稿适配器或不支持此格式的目标。请先连接账号，并核对原生草稿的内容格式是否为文章。</p>}<p className="hint">公开发布队列暂停时仍可明确授权保存草稿。保存结果不明时先核对原草稿，不自动重试。</p></section>
+    <section className="note-card"><h3>只保存草稿，稍后在平台审核</h3><p>微信公众号、知乎与哔哩哔哩专栏需要先在“平台与账号”连接草稿扩展，并将对应适配稿格式设为文章。X、LinkedIn 和 Reddit 使用 Postiz 审稿草稿，保存在 Postiz，不会写入平台原生草稿箱。</p><button disabled={busy || dirty || !accountIds.length} onClick={() => void action(async () => { const items = [{ articleId: draft.id, accountIds, expectedRevision: draft.revision }]; setBatchResult(await writeWorkspace('deliveries/batch', { action: 'save_draft', items, commandId: commands(JSON.stringify(items)) }, deliveryBatchSchema)); }, '草稿保存任务已创建。请查看每个平台的草稿标识与链接，公开发布仍需另行操作。')}>授权并保存当前版本到所选草稿箱</button>{accountIds.length > 0 && !draftAccountsReady && <p className="hint">所选账号中有尚未连接草稿适配器或不支持此格式的目标。可用目标会继续处理，其余目标显示具体原因。请核对草稿连接与文章格式。</p>}<p className="hint">公开发布队列暂停时仍可明确授权保存草稿。保存结果不明时先核对原草稿，不自动重试。</p></section>
+    {batchResult ? <div role="status">{batchResult.items.map(item => <p key={item.accountId}>{accounts.find(account => account.id === item.accountId)?.label} · {statusLabel(item.status)}{item.error ? `：${item.error}` : ''}</p>)}</div> : null}
     {dirty && draft.adaptationStatus !== 'pending' && <p className="hint">有未保存的编辑，请先保存修改并核对版本。</p>}
     <div className="job-list task-deliveries">{deliveries.toReversed().map(job => <JobPanel key={job.id} job={job} title={job.snapshot?.draft?.title ?? draft.title} account={accounts.find(account => account.id === job.accountId)} busy={busy} action={action}/>)}</div>
   </section>;
@@ -49,6 +56,7 @@ function DraftJobPanel({ job, title, account, busy, action }: JobPanelProps) {
     <div className="job-actions"><a className="button" href={`/api/jobs/${job.id}/export`}>下载此次草稿内容包</a>{canContinue && <><button disabled={busy} onClick={() => void action(() => request(`jobs/${job.id}/continue`, {}), '已请求继续保存同一草稿任务。')}>继续保存草稿</button><button disabled={busy} onClick={() => void action(() => request(`jobs/${job.id}/cancel`, {}), '草稿任务已取消。')}>取消草稿任务</button></>}</div>
     {uncertain && <div className="alert"><p>草稿提交结果需要核对。请查看原账号草稿列表，找到同一内容后记录草稿标识与链接；不要重复保存或另建任务。</p>{job.provider === 'postiz' ? <p>请在已连接的 Postiz 工作区中检查草稿列表。</p> : <a href={job.platform === 'bilibili' ? 'https://member.bilibili.com/platform/upload/text' : nativeUrls[job.platform]} target="_blank" rel="noreferrer">打开平台核对草稿 ↗</a>}</div>}
     {(job.status === 'needs_reconciliation' || job.status === 'draft_saved' && receipt?.verification === 'adapter_reported') && <DraftReceiptForm key={`${job.id}:${receipt?.id ?? 'unknown'}`} job={job} busy={busy} action={action}/>}
+    {job.status === 'draft_saved' && job.provider === 'native' && receipt?.verification === 'operator_verified' ? <div className="note-card"><p>如插件仍提示此任务需要核对，可同步已确认的原回执。此操作保留原任务，不会再次发送草稿。</p><button disabled={busy} onClick={()=>void action(()=>request(`jobs/${job.id}/draft-receipt/sync`,{}),'已同步原草稿回执，没有重新创建草稿。')}>同步已核对回执到插件</button></div> : null}
     <details><summary>不可变草稿历史</summary><ol className="history">{job.history.map((event, index) => <li key={`${index}-${event.at}`}><strong>{statusLabel(event.status)}</strong><span>{new Date(event.at).toLocaleString('zh-CN')}</span><p>{event.message}</p></li>)}</ol></details>
   </article>;
 }

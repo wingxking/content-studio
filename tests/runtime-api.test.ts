@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { emptyState } from '../src/core/model.ts';
-import { runtimeActivity } from '../src/server/runtime-api.ts';
+import { runtimeActivity, runtimeKnowledgeSummary } from '../src/server/runtime-api.ts';
+import { KnowledgeStore } from '../src/core/knowledge.ts';
 
 const environment = { ...process.env }; const originalFetch = globalThis.fetch;
 let directory = ''; let workspace = '';
@@ -27,4 +28,14 @@ test('activity selects scoped summaries and survives a failing dependency withou
 test('unconfigured workspaces return a safe setup warning without accessing the database', async () => {
   delete process.env.STUDIO_WORKSPACE_ID; globalThis.fetch = async () => { throw new Error('Unexpected network request'); };
   const activity = await runtimeActivity(); assert.equal(activity.items.length, 0); assert.equal(activity.publishingPaused, null); assert.deepEqual(activity.warnings, ['工作区尚未配置，请先检查 Docker 配置。']);
+});
+test('an unavailable optional mount preserves the usable uploaded knowledge library', async () => {
+  const missingMount = join(directory, 'disconnected-mount');
+  process.env.STUDIO_KNOWLEDGE_IMPORT_DIR = missingMount;
+  const store = new KnowledgeStore(join(directory, 'knowledge'), missingMount);
+  const source = await store.upload('brand-guide.md', Buffer.from('Use clear descriptions and cite primary sources.'));
+  const summary = await runtimeKnowledgeSummary(store);
+  assert.deepEqual(summary, { configured: true, available: false, importedSources: 1, mountFiles: 0 });
+  assert.match((await store.excerpt(source.id)).excerpt, /primary sources/u);
+  assert.doesNotMatch(JSON.stringify(summary), /disconnected-mount|brand-guide/u);
 });

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { emptyState, jobSchema, type Account } from '../src/core/model.ts';
 import { publicationHandoff } from '../src/core/delivery.ts';
 import { expectedYouTubeChannelId } from '../src/core/youtube.ts';
+import { videoProjectSchema, videoSettingsSchema } from '../src/core/video-model.ts';
 
 const originalEnvironment = { ...process.env };
 const originalFetch = globalThis.fetch;
@@ -37,11 +38,15 @@ for (const scenario of [
     const account: Account = { id: randomUUID(), platform: 'youtube', label: 'Test channel', provider: 'native', integrationId: expectedYouTubeChannelId, status: scenario.connected ? 'connected' : 'blocked', note: 'Isolated fixture.', verifiedAt: timestamp };
     const job = jobSchema.parse({ id: randomUUID(), draftId: null, subject: { kind: 'video', id: videoId, revision: 1 }, platform: 'youtube', accountId: account.id, approvedHash: 'a'.repeat(64), snapshot: { account, variant: { platform: 'youtube', title: 'Reviewed video', text: 'Reviewed description.', tags: [], mediaPaths: [], format: 'video' }, video: { projectId: videoId, revision: 1, renderId: randomUUID(), renderHash: 'b'.repeat(64), approvalHash: 'a'.repeat(64), sources: [] } }, status: 'failed', scheduledAt: timestamp, createdAt: timestamp, provider: 'native', remoteId: null, remoteUrl: null, attempts: 0, error: 'Publishing paused before submission.', history: [] });
     const state = { ...emptyState(), accounts: [account], jobs: [job] };
+    const project = videoProjectSchema.parse({ id: videoId, version: 1, createdAt: timestamp, updatedAt: timestamp,
+      brief: { topic: 'Reviewed video', audience: 'New viewers', instruction: 'Explain a workflow.', platform: 'youtube', sources: [] },
+      revision: 1, revisions: [{ number: 1, createdAt: timestamp, content: null, settings: videoSettingsSchema.parse({}), sourceArticle: null, assessment: null }], proposals: [], renders: [], status: 'editing', approval: null, deliveryApproval: null });
     let operationQueries = 0;
     globalThis.fetch = async input => {
       const url = new URL(String(input));
       assert.equal(url.origin, 'https://database.invalid');
       if (url.pathname === '/rest/v1/content_studio_workspaces') return Response.json([{ id: process.env.STUDIO_WORKSPACE_ID, state, revision: 1 }]);
+      if (url.pathname === '/rest/v1/studio_video_projects') { assert.equal(url.searchParams.get('id'), `eq.${videoId}`); return Response.json([{ content: project }]); }
       assert.equal(url.pathname, '/rest/v1/studio_operations');
       assert.equal(url.searchParams.get('subject_kind'), 'eq.video');
       assert.equal(url.searchParams.get('subject_id'), `eq.${videoId}`);

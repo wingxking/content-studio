@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, test } from 'node:test';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,8 +9,8 @@ import { taskInputSchema, taskSchema } from '../src/core/task-model.ts';
 import { listModels } from '../src/core/models.ts';
 import { extractSourceText, isPublicAddress, researchSources, validateSourceUrl } from '../src/core/research.ts';
 import { classifyCodexFailure, codexOutputSchema, runStructuredGeneration } from '../src/core/generation-engine.ts';
-import { configureTaskRuntime, getTaskRun, processTaskRun, readRunArtifact } from '../src/core/tasks.ts';
-import { variantSchema, briefSchema, emptyState } from '../src/core/model.ts';
+import { configureTaskRuntime, createTask, getTaskRun, processTaskRun, readRunArtifact, updateTask } from '../src/core/tasks.ts';
+import { variantSchema, briefSchema, draftSchema, emptyState, accountSchema, stateSchema } from '../src/core/model.ts';
 import { discoveryPromptInputSchema } from '../src/core/content-prompts.ts';
 
 const env = { ...process.env }; const fetcher = globalThis.fetch; let directory = '';
@@ -75,6 +76,33 @@ test('container application catalog preserves the native Codex cache', async () 
   assert.deepEqual(await listModels(), [{ id: 'app-model', name: 'App', description: 'Public metadata' }]);
   assert.equal(await readFile(join(directory, 'models_cache.json'), 'utf8'), native);
 });
+test('model outages permit preserving and disabling saved tasks while new admission still validates the model', async () => {
+  const workspace = randomUUID(); const id = randomUUID(); const at = new Date().toISOString();
+  let config = input(); let saves = 0; let catalogReads = 0; let catalogAvailable = false;
+  const row = () => ({ id, workspace_id: workspace, config, created_at: at, updated_at: at, next_run_at: null });
+  process.env.SUPABASE_URL = 'http://127.0.0.1:54321'; process.env.SUPABASE_SECRET_KEY = 'fixture-only'; process.env.STUDIO_WORKSPACE_ID = workspace; process.env.STUDIO_MODEL_EXECUTOR_URL = 'http://127.0.0.1:8910';
+  globalThis.fetch = async (request, init) => {
+    const url = new URL(String(request));
+    if (url.pathname === '/models') { catalogReads++; return catalogAvailable ? Response.json([{ id: 'model-test', name: 'Fixture model', description: 'Fixture' }]) : new Response(null, { status: 503 }); }
+    if (url.pathname.endsWith('/studio_tasks')) return Response.json([row()]);
+    if (url.pathname.endsWith('/content_studio_workspaces')) return Response.json([{ id: workspace, state: emptyState(), revision: 0 }]);
+    if (url.pathname.endsWith('/rpc/studio_save_task')) { const body = z.object({ p_id: z.literal(id), p_config: taskInputSchema }).parse(JSON.parse(String(init?.body))); config = body.p_config; saves++; return Response.json(row()); }
+    throw new Error('Unexpected request in offline task maintenance fixture.');
+  };
+  assert.equal((await updateTask(id, { ...config, enabled: false })).enabled, false);
+  const schedule = { type: 'daily' as const, time: '11:20', timezone: 'Asia/Singapore' };
+  assert.deepEqual((await updateTask(id, { ...config, frequency: schedule })).frequency, schedule);
+  assert.equal(catalogReads, 0); assert.equal(saves, 2); assert.equal(config.model, 'model-test');
+  await assert.rejects(updateTask(id, { ...config, enabled: true }), /model-runner/);
+  await assert.rejects(updateTask(id, { ...config, model: 'other-model' }), /model-runner/);
+  await assert.rejects(createTask({ ...config, enabled: false }), /model-runner/);
+  await assert.rejects(createTask({ ...config, enabled: false }, randomUUID()), /model-runner/);
+  assert.equal(saves, 2); assert.equal(config.enabled, false); assert.equal(config.model, 'model-test');
+  catalogAvailable = true; assert.equal((await updateTask(id, { ...config, enabled: true })).enabled, true);
+  const readsAfterEnable = catalogReads; catalogAvailable = false;
+  assert.equal((await updateTask(id, { ...config, title: 'A preserved enabled task' })).title, 'A preserved enabled task');
+  assert.equal(catalogReads, readsAfterEnable); assert.equal(config.enabled, true);
+});
 async function fakeCodex(body: string): Promise<void> {
   const binary = join(directory, 'codex');
   await writeFile(binary, `#!${process.execPath}\n${body}\n`); await chmod(binary, 0o700); process.env.CODEX_BIN = binary;
@@ -118,6 +146,13 @@ test('task persists master before adaptation, resumes checkpoints and creates on
   process.env.SUPABASE_URL = 'http://127.0.0.1:54321'; process.env.SUPABASE_SECRET_KEY = 'test-key'; process.env.STUDIO_WORKSPACE_ID = workspace;
   globalThis.fetch = async (request, init) => {
     const url = String(request); const body = init?.body ? z.record(z.string(), z.unknown()).parse(JSON.parse(String(init.body))) : {};
+    if (url.includes('/rpc/studio_commit_article')) {
+      const draft = draftSchema.parse(body.p_content); const previous = state.drafts.find(item => item.id === draft.id);
+      if (previous && body.p_expected_revision === 0) return Response.json(previous);
+      assert.equal(previous?.revision ?? 0, body.p_expected_revision);
+      state.drafts = [...state.drafts.filter(item => item.id !== draft.id), draft]; revision++;
+      return Response.json(draft);
+    }
     if (url.includes('/rpc/studio_claim_task_run')) { row = { ...row, status: 'researching', attempt: Number(row.attempt) + 1 }; return Response.json(row); }
     if (url.includes('/rpc/studio_patch_task_run')) {
       const patch = z.record(z.string(), z.unknown()).parse(body.p_patch); const mapped = Object.fromEntries(Object.entries(patch).map(([key, value]) => [key === 'draftId' ? 'draft_id' : key === 'outputPaths' ? 'output_paths' : key, value])); row = { ...row, ...mapped }; return Response.json(row);
@@ -155,4 +190,30 @@ test('task persists master before adaptation, resumes checkpoints and creates on
   assert.deepEqual(state.drafts[0]?.generationAssetIds, run.taskSnapshot.assetIds);
   const artifact = z.object({ status: z.string(), phase: z.string(), progress: z.number(), draftId: z.string() }).parse(JSON.parse((await readRunArtifact(runId, 'package.json')).content.toString()));
   assert.equal(artifact.status, 'succeeded'); assert.equal(artifact.phase, 'completed'); assert.equal(artifact.progress, 100); assert.equal(artifact.draftId, runId);
+});
+test('completed task redelivery deduplicates original draft sync and skips later manual revisions', async () => {
+  const workspace = '8ff4c0f0-306d-4aaf-82a9-ab01bcf637c0'; const runId = 'b4b5668e-ae17-4e85-b7df-5d91030f9ce0'; const taskId = 'd60ab85b-39c5-46e7-96c8-078811a82d92'; const accountId = '6cf78373-c208-4a31-b3bb-427676fc51f8';
+  const timestamp = '2026-10-10T12:00:00.000Z'; const variant = variantSchema.parse({ platform: 'zhihu', title: 'Original task article', text: 'Evidence-backed workflow.', tags: [], mediaPaths: [], format: 'article' });
+  const brief = briefSchema.parse({ topic: 'Software workflows', audience: 'Software teams', angle: 'Practical workflow review', sources: [{ title: 'Evidence', url: 'https://example.org/article', excerpt: 'Supplied software evidence.' }], platforms: ['zhihu'] });
+  const draft = draftSchema.parse({ id: runId, revision: 1, createdAt: timestamp, approvedHash: null, brief, title: variant.title, body: variant.text, variants: [variant], generationModel: 'model-test', generationInstruction: 'Use supplied evidence.', generationAssetIds: [], adaptationStatus: 'current' });
+  let state = emptyState(); state.drafts = [draft]; state.accounts = [accountSchema.parse({ id: accountId, platform: 'zhihu', label: 'Fixture account', provider: 'native', integrationId: '', status: 'connected', note: '', verifiedAt: timestamp, draftConnection: { adapter: 'wechatsync', userId: 'fixture', extensionId: 'a'.repeat(32), permissionConfirmed: true, checkedAt: timestamp } })]; let revision = 0;
+  let row: Record<string, unknown> = { id: runId, task_id: taskId, slot: 'manual:test', task_snapshot: { ...input(), platforms: ['zhihu'], enabled: false, draftSync: { enabled: true, accountIds: [accountId] }, id: taskId, createdAt: timestamp, updatedAt: timestamp, nextRunAt: null }, status: 'succeeded', phase: 'completed', progress: 100, attempt: 1, error: null, warnings: [], sources: brief.sources, questions: [], master: { title: draft.title, body: draft.body }, variants: [variant], draft_id: runId, output_paths: { master: 'master.md', package: 'package.json', platforms: { zhihu: 'zhihu.md' } }, started_at: timestamp, finished_at: timestamp, created_at: timestamp, updated_at: timestamp };
+  const operations: Record<string, unknown>[] = [];
+  process.env.SUPABASE_URL = 'http://127.0.0.1:54321'; process.env.SUPABASE_SECRET_KEY = 'test-key'; process.env.STUDIO_WORKSPACE_ID = workspace;
+  globalThis.fetch = async (request, init) => {
+    const url = String(request); const body = init?.body ? z.record(z.string(), z.unknown()).parse(JSON.parse(String(init.body))) : {};
+    if (url.includes('/rpc/studio_claim_task_run')) return Response.json(null);
+    if (url.includes('/studio_task_runs?')) { if (init?.method === 'PATCH') row = { ...row, ...body }; return Response.json([row]); }
+    if (url.includes('/content_studio_workspaces')) { if (init?.method === 'PATCH') { state = stateSchema.parse(body.state); revision++; } return Response.json([{ id: workspace, state, revision }]); }
+    if (url.includes('/rpc/studio_create_operation')) { operations.push({ id: body.p_id, draft_id: body.p_draft, kind: body.p_kind, status: 'queued', phase: 'queued', input: body.p_input, output: null, error: null, created_at: timestamp, updated_at: timestamp }); return Response.json(body.p_id); }
+    if (url.includes('/studio_operations?')) return Response.json(operations);
+    throw new Error('Unexpected database request in draft synchronization recovery test.');
+  };
+  const recover = () => processTaskRun(runId, 'fb903f2d-a5d7-4c45-bf45-07edcc9736be', new AbortController().signal);
+  await recover(); assert.equal(state.jobs.length, 1); assert.equal(operations.length, 1); assert.equal(state.jobs[0]?.snapshot?.draft?.revision, 1);
+  await recover(); assert.equal(state.jobs.length, 1); assert.equal(operations.length, 1); assert.deepEqual(row.warnings, []);
+  state.drafts = [{ ...draft, revision: 2, title: 'Manually edited article', variants: [{ ...variant, title: 'Manually edited article' }] }];
+  await recover(); assert.equal(state.jobs.length, 1); assert.equal(operations.length, 1); assert.equal(state.jobs[0]?.snapshot?.draft?.revision, 1);
+  assert.match(z.array(z.string()).parse(row.warnings).join(' '), /skipped.*changed after the task/u);
+  await recover(); assert.equal(z.array(z.string()).parse(row.warnings).length, 1); assert.equal(state.jobs.length, 1);
 });

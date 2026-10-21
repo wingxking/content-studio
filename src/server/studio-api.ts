@@ -28,6 +28,10 @@ import { readState } from '../core/store.ts';
 export const studioApi = Router();
 const id = (value: unknown): string => z.uuid().parse(value);
 studioApi.get('/youtube/status', async (_req, res) => {
+  try { res.json(await readPrivateJson(join(dataDirectory(), 'publication-journals', 'channel-status.json'))); }
+  catch { res.json({ available: false, error: 'Use the authorization check action to verify the existing channel.' }); }
+});
+studioApi.post('/youtube/check', async (_req, res) => {
   const operation = await createDeliveryRecoveryOperation(null, 'verify_channel');
   let previous: unknown = null; try { previous = await readPrivateJson(join(dataDirectory(), 'publication-journals', 'channel-status.json')); } catch { /* Pending worker verification is explicit below. */ }
   for (let attempt = 0; attempt < 30; attempt++) { const current = await getOperation(operation.id); if (current.status === 'succeeded') { res.json({ available: true, ...z.object({ channelId: z.string() }).parse(current.output) }); return; } if (current.status === 'failed') { res.json({ available: false, error: current.error }); return; } await delay(500); }
@@ -38,10 +42,10 @@ studioApi.post('/runtime/scheduler', async (req, res) => res.json(await dbRpc('s
 studioApi.get('/models', async (_req, res) => res.json(await listModels()));
 studioApi.post('/models/refresh', async (_req, res) => { const response = await fetch(`${modelExecutorOrigin()}/models/refresh`, { method: 'POST', signal: AbortSignal.timeout(35000), redirect: 'error' }); if (!response.ok) throw new Error('Authorize the model container, then refresh models.'); res.json(await response.json()); });
 studioApi.get('/tasks', async (_req, res) => res.json(await listTasks()));
-studioApi.post('/tasks', async (req, res) => res.json(await createTask(taskInputSchema.parse(req.body))));
+studioApi.post('/tasks', async (req, res) => res.json(await createTask(taskInputSchema.parse(req.body), z.uuid().optional().parse(req.body.commandId))));
 studioApi.get('/tasks/:id', async (req, res) => res.json(await getTask(id(req.params.id))));
 studioApi.put('/tasks/:id', async (req, res) => res.json(await updateTask(id(req.params.id), taskInputSchema.parse(req.body))));
-studioApi.post('/tasks/:id/run', async (req, res) => res.json(await enqueueTaskRun(id(req.params.id), { manual: true })));
+studioApi.post('/tasks/:id/run', async (req, res) => res.json(await enqueueTaskRun(id(req.params.id), { manual: true, requestId: z.uuid().optional().parse(req.body?.commandId) })));
 studioApi.get('/tasks/:id/runs', async (req, res) => res.json(await listTaskRuns(id(req.params.id))));
 studioApi.get('/runs', async (_req, res) => res.json(await listTaskRuns()));
 studioApi.get('/runs/:id/promotions', async (req, res) => res.json(await listDiscoveryPromotions(await taskWorkspaceId(), id(req.params.id))));

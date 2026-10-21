@@ -1,0 +1,13 @@
+export const observationWindowMs: number;
+export const observationIntervalMs: number;
+export const observationMaximumGapMs: number;
+export type ObservationOptions = { workspaceId: string; release: { version: string; sourceDigest: string }; directory: string; port: number; once: boolean; reset: boolean };
+export type ObservationSample = { release: { version: string; sourceDigest: string; builtAt: string }; checks: { apiHealth: true; apiReadiness: true; releaseMatched: true; requiredSetupReady: true } };
+export type ObservationReport = { version: 1; scope: 'runtime_readiness_only'; executionId: string; workspaceId: string; release: { version: string; sourceDigest: string; builtAt: string | null }; status: 'running' | 'passed' | 'smoke_only' | 'failed' | 'interrupted'; startedAt: string; checkedAt: string | null; targetHours: 48; intervalSeconds: 60; maximumGapSeconds: 180; samples: number; elapsedHours: number; monotonicElapsedHours: number; accepted: boolean; qualityAccepted: false; productionAccepted: false; checks: ObservationSample['checks'] | null; error: string | null };
+export function parseObservationOptions(args: string[], environment: NodeJS.ProcessEnv): ObservationOptions;
+export function sampleRuntimeReadiness(expected: ObservationOptions['release'], fetchJson: (path: string) => Promise<unknown>): Promise<ObservationSample>;
+export function loopbackReadinessJson(port: number, path: string, signal?: AbortSignal, deadlineMs?: number): Promise<unknown>;
+export function createObservationReport(options: ObservationOptions, at: number): ObservationReport;
+export function advanceObservation(report: ObservationReport, sample: ObservationSample, timing: { at: number; elapsedMs: number; gapMs: number }, once?: boolean): ObservationReport;
+export function observationStatusAt(report: ObservationReport, at?: number): ObservationReport;
+export function runRuntimeObservation(options: ObservationOptions, dependencies?: { now?: () => number; monotonic?: () => number; wait?: (milliseconds: number, signal?: AbortSignal) => Promise<unknown>; log?: (report: ObservationReport) => void; signal?: AbortSignal; onStarted?: () => void; fetchJson?: (path: string) => Promise<unknown> }): Promise<ObservationReport>;

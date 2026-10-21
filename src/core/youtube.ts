@@ -196,6 +196,10 @@ async function uploadYouTubeJobOwned(id: string, settingsInput: Settings, input:
   const settings = youtubeSettingsSchema.parse(settingsInput);
   if (await loadJournal(id)) throw new Error('A durable YouTube upload journal already exists. Reconcile it; this command never starts a second upload.');
   const bundle = await exportJob(id);
+  if (bundle.job.snapshot?.video && 'hashVersion' in bundle.job.snapshot.video) {
+    const { approvedVideoUploadSettings } = await import('./video-delivery.ts');
+    approvedVideoUploadSettings(bundle.job, settings);
+  }
   await verifyCurrent(await readState(), bundle.job);
   const resolvedFiles = await Promise.all(bundle.variant.mediaPaths.map(resolveMediaLocation));
   const files = resolvedFiles.filter(path => /\.mp4$/i.test(path));

@@ -8,6 +8,7 @@ import { WebSocket } from 'ws';
 import { createDraftBridge, type DraftBridgeOptions } from '../src/server/draft-bridge.ts';
 import { draftBridgeConfigStatus, readDraftBridgeConfig, saveDraftBridgeConfig, type DraftBridgeConfig } from '../src/core/draft-bridge-config.ts';
 
+const protocolHello = { protocol: 'content-studio-drafts', version: 1, draftOnly: true, platforms: ['weixin', 'zhihu', 'bilibili'] };
 const fixture: DraftBridgeConfig = { extensionId: 'a'.repeat(32), extensionToken: 'private-extension-token-fixture', pairingKey: 'pairing-key-fixture-'.repeat(3), serviceKey: 'service-key-fixture-'.repeat(3) };
 let directory: string; let configPath: string;
 let bridge: ReturnType<typeof createDraftBridge>; let address: { wsPort: number; httpPort: number };
@@ -38,9 +39,9 @@ async function request(value: unknown, extra: Record<string, string> = {}): Prom
   return { status: response.status, data: await response.json() };
 }
 type Message = { id: string; method: string; token: string; params: Record<string, unknown> };
-const isHeartbeat = (message: Message): boolean => message.method === 'checkAuth' && message.params.platform === 'zip-download';
+const isHeartbeat = (message: Message): boolean => message.method === 'studio.hello';
 const heartbeats = (client: WebSocket): Message[] => received.get(client)?.filter(isHeartbeat) ?? [];
-function replyHeartbeat(client: WebSocket, message: Message): void { client.send(JSON.stringify({ id: message.id, result: { isAuthenticated: true, username: '本地下载' } })); }
+function replyHeartbeat(client: WebSocket, message: Message): void { client.send(JSON.stringify({ id: message.id, result: protocolHello })); }
 function nextMessage(client: WebSocket): Promise<Message> { return new Promise(resolve => {
   const listener = (bytes: Buffer) => { const message = JSON.parse(bytes.toString()) as Message; if (isHeartbeat(message)) return; client.off('message', listener); resolve(message); };
   client.on('message', listener);
@@ -50,7 +51,7 @@ async function until(check: () => boolean | Promise<boolean>): Promise<void> { c
 async function accelerated(options: Partial<DraftBridgeOptions> = {}): Promise<void> {
   await bridge.close(); bridge = createDraftBridge({ configPath, host: '127.0.0.1', wsPort: 0, httpPort: 0, readTimeoutMs: 250, writeTimeoutMs: 600, heartbeatIntervalMs: 25, heartbeatTimeoutMs: 150, ...options }); address = await bridge.start();
 }
-const sync = (platform = 'zhihu') => ({ method: 'syncArticle', params: { platforms: [platform], article: { title: 'Reviewed title', content: '<p>Reviewed original article</p>' } } });
+const sync = (platform = 'zhihu') => ({ method: 'syncArticle', params: { platforms: [platform], draftOnly: true, execution: { protocolVersion: 1, jobId: '0b5c68ba-e5e7-45b4-a8c5-b2b7e39c5937', contentHash: 'a'.repeat(64), expectedUserId: 'reviewed-user' }, article: { title: 'Reviewed title', content: '<p>Reviewed original article</p>' } } });
 
 test('bridge config is private, atomic, strict and never reveals tokens through status or errors', async () => {
   assert.deepEqual(await readDraftBridgeConfig(configPath), fixture);
@@ -68,7 +69,7 @@ test('HTTP requires internal bearer authorization and rejects browser origins', 
   assert.equal(unauthenticated.status, 401);
   const browser = await request({ method: 'listPlatforms' }, { Origin: 'http://localhost:14310' }); assert.equal(browser.status, 403);
   const status = await fetch(`http://127.0.0.1:${address.httpPort}/status`, { headers: headers() });
-  assert.deepEqual(await status.json(), { configured: true, connected: false });
+  assert.deepEqual(await status.json(), { configured: true, connected: false, features: [] });
   assert.equal(status.headers.get('access-control-allow-origin'), null);
 });
 
@@ -96,7 +97,7 @@ test('only reviewed one-target draft methods are forwarded without a publish opt
   for (const platform of ['weixin', 'zhihu', 'bilibili']) {
     const message = nextMessage(client); const result = request(sync(platform)); const payload = await message;
     assert.equal(payload.method, 'syncArticle'); assert.deepEqual(payload.params, sync(platform).params);
-    assert.equal(Object.hasOwn(payload.params, 'draftOnly'), false);
+    assert.equal(payload.params.draftOnly, true);
     client.send(JSON.stringify({ id: payload.id, result: { results: [{ platform, success: true, postId: '123', draftOnly: true }], syncId: 'sync-1' } }));
     assert.equal((await result).status, 200);
   }
@@ -111,17 +112,17 @@ test('only reviewed one-target draft methods are forwarded without a publish opt
   ]) assert.equal((await request(value)).status, 400);
 });
 
-test('image upload uses one reviewed target and bounded base64 without exposing filesystem paths', async () => {
-  const client = await connect(); const message = nextMessage(client);
-  const result = request({ method: 'uploadImage', params: { platform: 'bilibili', mimeType: 'image/png', imageData: 'YQ==' } });
-  const payload = await message; assert.equal(payload.method, 'uploadImage');
-  client.send(JSON.stringify({ id: payload.id, result: { platform: 'bilibili', url: 'https://i0.hdslb.com/example.png' } })); assert.equal((await result).status, 200);
-  assert.equal((await request({ method: 'uploadImage', params: { platform: 'bilibili', mimeType: 'image/png', imageData: '/data/media.png' } })).status, 400);
+test('standalone image uploads and broad login scans cannot bypass a reviewed draft job', async () => {
+  await connect();
+  assert.equal((await request({ method: 'uploadImage', params: { platform: 'bilibili', mimeType: 'image/png', imageData: 'YQ==' } })).status, 400);
+  assert.equal((await request({ method: 'listPlatforms' })).status, 400);
+  const { execution: _execution, ...unguarded } = sync().params;
+  assert.equal((await request({ method: 'syncArticle', params: unguarded })).status, 400);
 });
 
 test('write disconnect is unknown and concurrent work cannot pass an active request', async () => {
   const client = await connect(); const message = nextMessage(client); const result = request(sync()); await message;
-  assert.deepEqual(await request({ method: 'listPlatforms' }), { status: 409, data: { error: { code: 'BUSY', message: 'A browser companion request is already running.' } } });
+  assert.deepEqual(await request({ method: 'checkAuth', params: { platform: 'zhihu' } }), { status: 409, data: { error: { code: 'BUSY', message: 'A browser companion request is already running.' } } });
   client.terminate();
   const stopped = await result; assert.equal(stopped.status, 502); assert.equal((stopped.data as { error: { code: string } }).error.code, 'UNKNOWN_OUTCOME');
 });
@@ -147,7 +148,7 @@ test('config rotation invalidates the old browser session before further dispatc
   await connect(); await saveDraftBridgeConfig({ ...fixture, extensionToken: 'a-different-private-extension-token' }, configPath);
   assert.equal((await request({ method: 'checkAuth', params: { platform: 'zhihu' } })).status, 503);
   const status = await fetch(`http://127.0.0.1:${address.httpPort}/status`, { headers: headers() });
-  assert.deepEqual(await status.json(), { configured: true, connected: false });
+  assert.deepEqual(await status.json(), { configured: true, connected: false, features: [] });
 });
 
 test('the first internal local probe authenticates the extension before any business dispatch', async () => {
@@ -157,7 +158,7 @@ test('the first internal local probe authenticates the extension before any busi
   assert.ok([...received.values()].every(messages => messages.length === 0));
   const client = await connect({ autoHeartbeat: false }); await until(() => heartbeats(client).length === 1);
   const probe = heartbeats(client)[0]!;
-  assert.deepEqual({ method: probe.method, token: probe.token, params: probe.params }, { method: 'checkAuth', token: fixture.extensionToken, params: { platform: 'zip-download' } });
+  assert.deepEqual({ method: probe.method, token: probe.token, params: probe.params }, { method: 'studio.hello', token: fixture.extensionToken, params: {} });
   assert.equal((await status()).connected, false); assert.equal((await request(sync())).status, 503);
   replyHeartbeat(client, probe); await until(async () => (await status()).connected);
   assert.equal((await request({ method: 'checkAuth', params: { platform: 'zip-download' } })).status, 400);
@@ -167,8 +168,8 @@ test('local heartbeats continue through a long business request without releasin
   await accelerated(); const client = await connect();
   const next = nextMessage(client); const saving = request(sync()); const business = await next;
   await until(() => heartbeats(client).length >= 3);
-  assert.deepEqual(await request({ method: 'listPlatforms' }), { status: 409, data: { error: { code: 'BUSY', message: 'A browser companion request is already running.' } } });
-  assert.ok(heartbeats(client).every(probe => probe.method === 'checkAuth' && Object.keys(probe.params).length === 1 && probe.params.platform === 'zip-download'));
+  assert.deepEqual(await request({ method: 'checkAuth', params: { platform: 'zhihu' } }), { status: 409, data: { error: { code: 'BUSY', message: 'A browser companion request is already running.' } } });
+  assert.ok(heartbeats(client).every(probe => probe.method === 'studio.hello' && Object.keys(probe.params).length === 0));
   client.send(JSON.stringify({ id: business.id, result: { results: [], syncId: 'one-write' } }));
   assert.equal((await saving).status, 200);
   assert.equal(received.get(client)?.filter(message => message.method === 'syncArticle').length, 1);
@@ -182,7 +183,7 @@ test('a single unanswered heartbeat neither queues more probes nor blocks busine
   const message = nextMessage(client); const result = request({ method: 'checkAuth', params: { platform: 'zhihu' } }); const business = await message;
   const probe = heartbeats(client)[1]!;
   // A wrong or completed heartbeat ID cannot resolve the separately tracked business request.
-  replyHeartbeat(client, heartbeats(client)[0]!); client.send(JSON.stringify({ id: 'not-the-current-probe', result: { isAuthenticated: true, username: '本地下载' } }));
+  replyHeartbeat(client, heartbeats(client)[0]!); client.send(JSON.stringify({ id: 'not-the-current-probe', result: protocolHello }));
   client.send(JSON.stringify({ id: business.id, result: { isAuthenticated: false } }));
   assert.deepEqual(await result, { status: 200, data: { result: { isAuthenticated: false } } });
   replyHeartbeat(client, probe);
@@ -220,4 +221,12 @@ test('idle config rotation, config removal and shutdown clear all heartbeat stat
     assert.equal(heartbeats(client).length, count);
     if (change !== 'remove' && change !== 'invalid' && change !== 'shutdown') assert.equal((await status()).connected, false);
   }
+});
+
+test('an upstream-only MCP extension cannot authenticate as the Studio executor', async () => {
+  const client = await connect({ autoHeartbeat: false });
+  await until(() => heartbeats(client).length === 1);
+  client.send(JSON.stringify({ id: heartbeats(client)[0]!.id, result: { isAuthenticated: true, username: '本地下载' } }));
+  await until(() => client.readyState === WebSocket.CLOSED);
+  assert.equal((await status()).connected, false);
 });

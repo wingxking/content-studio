@@ -8,6 +8,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { emptyState, type Brief, type Generated, type Platform } from '../src/core/model.ts';
 import { addAccount, approveDraft, cancelJob, confirmPublication, createDraft, exportJob, extractPlatformId, pausePublishing, reconcileJob, recordMetrics, replaceDraft, runDueJobs, scheduleJob, updateAccount, validateReceipt } from '../src/core/pipeline.ts';
 import { canonicalPostizContent } from '../src/core/postiz.ts';
+import { DeliveryInputError } from '../src/core/delivery-errors.ts';
 import { mutateState, readState, storageMode } from '../src/core/store.ts';
 import { generateContent } from '../src/core/generator.ts';
 
@@ -242,7 +243,7 @@ test('transmitted tags count toward platform limits and dedupe the final text', 
   await assert.rejects(scheduleJob({ draftId: anotherDraft.id, accountId: account.id, scheduledAt: date }), /same content/);
   const oversized = generated('x', 'a'.repeat(278)); oversized.variants[0]!.tags = ['tag'];
   await replaceDraft(draft.id, oversized); await approveDraft(draft.id);
-  await assert.rejects(scheduleJob({ draftId: draft.id, accountId: account.id, scheduledAt: date }), /text and tags/);
+  await assert.rejects(scheduleJob({ draftId: draft.id, accountId: account.id, scheduledAt: date }), error => error instanceof DeliveryInputError && error.code === 'CONTENT_INVALID');
 });
 test('unknown outcome reconciliation uses immutable original content and target after source edits', async () => {
   let submittedAt = ''; let submittedContent = '';

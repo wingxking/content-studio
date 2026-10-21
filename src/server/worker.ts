@@ -13,20 +13,38 @@ import { runDueJobs } from '../core/pipeline.ts';
 import { runDuePublicationChecks } from '../core/publication-checks.ts';
 import { dataDirectory } from '../core/store.ts';
 import { configureTaskRuntime, getTaskRun, processTaskRun, taskRunOwnership, taskWorkspaceId } from '../core/tasks.ts';
+import { closeProcessHealth, createProcessHealth, listenProcessHealth } from './process-health.ts';
+import { processSourceCollection } from '../core/source-registry.ts';
+import { processDeliveryBatchItem } from '../application/delivery-batches.ts';
+import { logDiagnostic } from '../core/diagnostics.ts';
 
-type WorkerHandler = (id: string, signal: AbortSignal) => Promise<void>;
+type WorkerHandler = (id: string, signal: AbortSignal, token: string) => Promise<void>;
 const handlers = new Map<string, WorkerHandler>();
 export function registerWorkerHandler(type: string, handler: WorkerHandler): void {
   handlers.set(z.string().regex(/^[a-z][a-z0-9_]{0,49}$/u).parse(type), handler);
 }
 registerWorkerHandler('studio_operation', handleStudioOperation);
-registerWorkerHandler('legacy_publish', async (_id, signal) => { signal.throwIfAborted(); await runDueJobs(); signal.throwIfAborted(); await runDuePublicationChecks(signal); });
+registerWorkerHandler('delivery_batch_item', processDeliveryBatchItem);
+registerWorkerHandler('source_collect', async (id, signal, token) => processSourceCollection(await taskWorkspaceId(), id, token, signal));
+export async function runDeliveryTick(signal: AbortSignal, actions = { dispatch: runDueJobs, verify: runDuePublicationChecks }): Promise<void> {
+  signal.throwIfAborted();
+  const failures: unknown[] = [];
+  try { await actions.dispatch(); } catch (error) { failures.push(error); }
+  signal.throwIfAborted();
+  // Readback can clear an account's dispatch barrier even if another submission failed.
+  try { await actions.verify(signal); } catch (error) { failures.push(error); }
+  signal.throwIfAborted();
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'Delivery dispatch and verification require attention.');
+}
+registerWorkerHandler('legacy_publish', async (_id, signal) => runDeliveryTick(signal));
 const claimSchema = z.object({ msgId: z.number().int().positive(), token: z.uuid(), message: z.object({ type: z.string(), id: z.uuid(), workspaceId: z.uuid() }) });
 export async function runWorkerOnce(parentSignal?: AbortSignal): Promise<boolean> {
   parentSignal?.throwIfAborted(); const workspace = await taskWorkspaceId();
   const role = z.enum(['article', 'video', 'delivery', 'all']).parse(process.env.STUDIO_WORKER_ROLE ?? 'all');
   const input = await dbRpc(process.env.STUDIO_WORKER_ROLE ? 'studio_claim_role_work' : 'studio_claim_work', { p_workspace: workspace, ...(process.env.STUDIO_WORKER_ROLE ? { p_role: role } : {}) }); if (!input) return false;
-  const claim = claimSchema.parse(input); const controller = new AbortController();
+  const claim = claimSchema.parse(input); const controller = new AbortController(); const started = Date.now();
+  await logDiagnostic({ level: 'info', event: 'work.started', service: role, jobId: claim.message.id });
   const signal = parentSignal ? AbortSignal.any([parentSignal, controller.signal]) : controller.signal;
   let ticking = false; let leaseError: Error | null = null;
   const heartbeat = setInterval(() => {
@@ -42,18 +60,22 @@ export async function runWorkerOnce(parentSignal?: AbortSignal): Promise<boolean
   }, 10000);
   heartbeat.unref();
   try {
-    if (claim.message.type === 'task_run') await processTaskRun(claim.message.id, claim.token, signal);
+    if (claim.message.type === 'task_run') {
+      if (await processTaskRun(claim.message.id, claim.token, signal) === 'deferred') return true;
+    }
     else {
       const handler = handlers.get(claim.message.type); if (!handler) throw new Error('No worker handler is registered for this queued work type.');
-      await handler(claim.message.id, signal);
+      await handler(claim.message.id, signal, claim.token);
     }
     if (leaseError || parentSignal?.aborted) throw leaseError ?? new Error('Worker stopping.');
     // A confirmed cancellation is terminal and can be acknowledged after its child process stops.
     if (signal.aborted && claim.message.type === 'task_run' && (await getTaskRun(claim.message.id)).status !== 'cancelled') throw new Error('Worker interrupted.');
     const acknowledged = await dbRpc('studio_ack_work', { p_workspace: workspace, p_msg: claim.msgId, p_token: claim.token });
     if (acknowledged !== true) throw new Error('Queue acknowledgement lost its lease.');
+    await logDiagnostic({ level: 'info', event: 'work.completed', service: role, jobId: claim.message.id, durationMs: Date.now() - started });
     return true;
   } catch (error) {
+    await logDiagnostic({ level: 'error', event: 'work.failed', service: role, jobId: claim.message.id, code: leaseError ? 'LEASE_LOST' : 'WORK_FAILED', durationMs: Date.now() - started });
     if (!leaseError && !parentSignal?.aborted && claim.message.type === 'task_run' && (await getTaskRun(claim.message.id)).status === 'cancelled') {
       await dbRpc('studio_ack_work', { p_workspace: workspace, p_msg: claim.msgId, p_token: claim.token }); return true;
     }
@@ -73,8 +95,9 @@ export async function initializeWorker(): Promise<void> {
     await rename(temporary, join(directory, process.env.STUDIO_WORKER_ROLE ? `worker-${process.env.STUDIO_WORKER_ROLE}-ready.json` : 'worker-ready.json'));
   } finally { await rm(temporary, { force: true }); }
 }
-export async function runWorker(signal: AbortSignal = new AbortController().signal): Promise<void> {
-  await initializeWorker();
+export async function runWorker(signal: AbortSignal = new AbortController().signal, onReady?: () => void): Promise<void> {
+  await initializeWorker(); onReady?.();
+  await logDiagnostic({ level: 'info', event: 'worker.started', service: z.enum(['article', 'video', 'delivery', 'all']).parse(process.env.STUDIO_WORKER_ROLE ?? 'all') });
   while (!signal.aborted) {
     try {
       const processed = await runWorkerOnce(signal);
@@ -88,6 +111,14 @@ export async function runWorker(signal: AbortSignal = new AbortController().sign
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const controller = new AbortController();
-  for (const name of ['SIGINT', 'SIGTERM'] as const) process.once(name, () => controller.abort());
-  await runWorker(controller.signal);
+  const health = createProcessHealth();
+  const port = z.coerce.number().int().min(1024).max(65535).parse(process.env.STUDIO_WORKER_HEALTH_PORT ?? '8911');
+  await listenProcessHealth(health.server, port);
+  let shutdownDeadline: NodeJS.Timeout | undefined;
+  for (const name of ['SIGINT', 'SIGTERM'] as const) process.once(name, () => {
+    health.stopping(); controller.abort();
+    shutdownDeadline ??= setTimeout(() => process.exit(1), 65000).unref();
+  });
+  try { await runWorker(controller.signal, health.ready); }
+  finally { if (shutdownDeadline) clearTimeout(shutdownDeadline); health.stopping(); await closeProcessHealth(health.server); }
 }

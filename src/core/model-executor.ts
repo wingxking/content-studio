@@ -31,7 +31,8 @@ export async function executeRemoteModel<T>(schema: z.ZodType<T>, prompt: string
   }
   const value: unknown = await response.json();
   if (!response.ok) { const error = z.object({ error: z.string() }).safeParse(value); throw new Error(error.success ? error.data.error : 'Model runner needs attention. Inspect container authorization and connectivity.'); }
-  const result = z.object({ result: z.unknown() }).parse(value); options.signal?.throwIfAborted();
+  const result = z.object({ result: z.unknown(), usage: z.object({ inputTokens: z.number().nullable(), outputTokens: z.number().nullable(), cachedInputTokens: z.number().nullable(), observedSearchEvents: z.number(), cost: z.null() }).optional() }).parse(value); options.signal?.throwIfAborted();
+  if (result.usage) await options.onUsage?.(result.usage);
   await options.onProgress?.({ phase: 'model_completed', message: 'Validating isolated model output.' });
   return parseStructuredOutput(schema, result.result);
 }

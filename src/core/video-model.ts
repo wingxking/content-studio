@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { accountSchema, sourceSchema, variantSchema } from './model.ts';
 import { assessmentSchema } from './task-model.ts';
+import { videoDeliverySettingsSchema } from '../contracts/video.ts';
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const revisionNumber = z.number().int().positive();
@@ -35,19 +36,26 @@ export const videoBriefSchema = z.object({ topic: z.string().min(1).max(1000), a
 export const videoRevisionSchema = z.object({ operationId: z.uuid().optional(), number: revisionNumber, createdAt: z.iso.datetime(), content: videoContentSchema.nullable(), settings: videoSettingsSchema, sourceArticle: videoSourceSchema.nullable(), assessment: assessmentSchema.nullable() }).strict();
 export const videoProposalSchema = z.object({ operationId: z.uuid().optional(), id: z.uuid(), baseRevision: revisionNumber, assessment: assessmentSchema, instruction: z.string(), content: videoContentSchema, createdAt: z.iso.datetime(), appliedRevision: revisionNumber.nullable() }).strict();
 export const videoOutputSchema = z.object({ rawPath: z.string(), videoPath: z.string(), captionsPath: z.string().nullable(), manifestPath: z.string(), hash: hashSchema, rawHash: hashSchema, duration: z.number().positive(), width: z.number().int().positive(), height: z.number().int().positive(), upstreamRevision: z.string().regex(/^[a-f0-9]{32}$/u), reusedStages: z.number().int().nonnegative(), renderedAssetId: z.uuid().nullable() }).strict();
-export const videoRenderSchema = z.object({ operationId: z.uuid().optional(), id: z.uuid(), revision: revisionNumber, inputHash: hashSchema, status: z.enum(['running', 'succeeded', 'failed', 'cancelled']), owner: z.uuid(), attempt: revisionNumber, phase: z.string(), startedAt: z.iso.datetime(), heartbeatAt: z.iso.datetime(), finishedAt: z.iso.datetime().nullable(), output: videoOutputSchema.nullable(), error: z.string().nullable() }).strict();
+export const videoRenderSchema = z.object({ operationId: z.uuid().optional(), hashVersion: z.literal(2).optional(), settings: videoSettingsSchema.optional(), id: z.uuid(), revision: revisionNumber, inputHash: hashSchema, status: z.enum(['running', 'succeeded', 'failed', 'cancelled']), owner: z.uuid(), attempt: revisionNumber, phase: z.string(), startedAt: z.iso.datetime(), heartbeatAt: z.iso.datetime(), finishedAt: z.iso.datetime().nullable(), output: videoOutputSchema.nullable(), error: z.string().nullable() }).strict();
+export const videoTargetApprovalSchema = z.object({ hashVersion: z.literal(2), targetRevision: revisionNumber, revision: revisionNumber, renderId: z.uuid(), renderInputHash: hashSchema, outputHash: hashSchema, approvalHash: hashSchema, account: accountSchema, variant: variantSchema, deliverySettings: videoDeliverySettingsSchema, at: z.iso.datetime() }).strict();
+export const videoTargetSchema = z.object({ id: z.uuid(), platform: videoPlatformSchema, revision: revisionNumber, sourceRevision: revisionNumber, accountId: z.uuid().nullable(), renderId: z.uuid().nullable(), title: variantSchema.shape.title, text: variantSchema.shape.text, tags: variantSchema.shape.tags, deliverySettings: videoDeliverySettingsSchema, approval: videoTargetApprovalSchema.nullable() }).strict();
+export const videoTargetInputSchema = videoTargetSchema.pick({ platform: true, accountId: true, renderId: true, title: true, text: true, tags: true, deliverySettings: true }).extend({ expectedRevision: revisionNumber, accountId: z.uuid().nullable().default(null), renderId: z.uuid().nullable().default(null), deliverySettings: videoDeliverySettingsSchema.default({}) }).strict();
+export const videoTargetEditSchema = videoTargetInputSchema.omit({ platform: true }).extend({ expectedTargetRevision: revisionNumber }).strict();
+export const videoRenderApprovalSchema = z.object({ revision: revisionNumber, inputHash: hashSchema, settings: videoSettingsSchema, at: z.iso.datetime() }).strict();
 export const videoProjectSchema = z.object({
   id: z.uuid(), version: revisionNumber, lastOperationId: z.uuid().optional(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), brief: videoBriefSchema,
   revision: revisionNumber, revisions: z.array(videoRevisionSchema).min(1), proposals: z.array(videoProposalSchema), renders: z.array(videoRenderSchema),
   status: z.enum(['editing', 'rendering', 'ready', 'failed']),
   approval: z.object({ revision: revisionNumber, inputHash: hashSchema, at: z.iso.datetime() }).strict().nullable(),
   deliveryApproval: z.object({ renderId: z.uuid(), revision: revisionNumber, accountId: z.uuid(), outputHash: hashSchema, approvalHash: hashSchema, account: accountSchema, variant: variantSchema, at: z.iso.datetime() }).strict().nullable(),
+  targets: z.array(videoTargetSchema).max(30).optional(),
+  renderApprovals: z.array(videoRenderApprovalSchema).optional(),
 }).strict();
 export const videoCreateInputSchema = z.object({
-  explicitlyRequested: z.literal(true), brief: videoBriefSchema, settings: videoSettingsSchema.optional(),
+  explicitlyRequested: z.literal(true), commandId: z.uuid().optional(), brief: videoBriefSchema, settings: videoSettingsSchema.optional(),
   sourceArticle: z.object({ draftId: z.uuid(), revision: revisionNumber }).strict().nullable().optional(),
   content: videoContentSchema.nullable().optional(),
-}).strict();
+}).strict().transform(input => ({ ...input, settings: input.settings ?? videoSettingsSchema.parse({ width: 1920, height: 1080, voice: /\p{Script=Han}/u.test(input.brief.topic + input.brief.instruction) ? 'zf_xiaobei' : 'af_heart' }) }));
 export const videoEditInputSchema = z.object({ expectedRevision: revisionNumber, content: videoContentSchema, settings: videoSettingsSchema.optional() }).strict();
 export const videoApprovalInputSchema = z.object({ expectedRevision: revisionNumber }).strict();
 export const videoRefinementInputSchema = z.object({ expectedRevision: revisionNumber, instruction: z.string().min(3).max(4000), sceneId: videoSceneSchema.shape.id.nullable().optional() }).strict();
@@ -60,3 +68,5 @@ export type VideoContent = z.infer<typeof videoContentSchema>;
 export type VideoSettings = z.infer<typeof videoSettingsSchema>;
 export type VideoScene = z.infer<typeof videoSceneSchema>;
 export type VideoBrief = z.infer<typeof videoBriefSchema>;
+export type VideoTarget = z.infer<typeof videoTargetSchema>;
+export type VideoTargetApproval = z.infer<typeof videoTargetApprovalSchema>;

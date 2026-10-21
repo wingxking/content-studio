@@ -1,6 +1,6 @@
 import { financeCommunityPreview } from './finance-platforms.ts';
 import { financePlatformIds } from './model.ts';
-import { withJobExecution } from './account-execution.ts';
+import { AccountExecutionBusyError, withJobExecution } from './account-execution.ts';
 import { validateLaunchVariant } from './publishing-capabilities.ts';
 import { resolveAssetPath } from './assets.ts';
 import type { ArticleNode } from './article-document.ts';
@@ -12,14 +12,15 @@ import { hostname } from 'node:os';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { accountSchema, briefSchema, draftSchema, generatedSchema, metricsInputSchema, nativeUrls, type Account, type Brief, type Draft, type Generated, type Job, type Platform, type StudioState, type Variant } from './model.ts';
-import { dataDirectory, mutateState, readState, storageMode } from './store.ts';
+import { dataDirectory, mutateState, readState } from './store.ts';
 import { createVerificationCheck } from './publication-checks.ts';
-import { dbRpc } from './database.ts';
 import { isManagedMediaPath, resolveMediaLocation } from './media-location.ts';
-import { writeDraftArtifacts } from './artifacts.ts';
+import { commitArticle, committedArticle } from './article-repository.ts';
 import { hasYouTubeUploadJournal } from './publication-journal.ts';
 import { assertAutomatedPublishingAllowed } from './publishing-policy.ts';
 import { sameDraftAccount } from './draft-connectors.ts';
+import { DeliveryInputError } from './delivery-errors.ts';
+import { assertPublicationAction } from './publication-intent.ts';
 import { canonicalPostizContent, listRemotePosts, RejectedPublishError, submitPostiz, validatePostizVariant, verifyIntegration, type Integration } from './postiz.ts';
 
 const owner = `${hostname()}:${process.pid}:${randomUUID()}`;
@@ -81,7 +82,7 @@ async function mediaInfo(path: string): Promise<{ hash: string; video: boolean }
   for await (const chunk of createReadStream(absolute)) hash.update(chunk as Buffer);
   return { hash: hash.digest('hex'), video };
 }
-async function draftHash(draft: Draft): Promise<string> {
+export async function draftHash(draft: Draft): Promise<string> {
   const media = await Promise.all(draft.variants.flatMap(variant => variant.mediaPaths.map(async path => ({ path, hash: (await mediaInfo(path)).hash }))));
   const documentAssets: { assetId: string; hash: string }[] = [];
   const visit = async (node: ArticleNode): Promise<void> => {
@@ -106,49 +107,49 @@ async function validateMedia(variant: Variant): Promise<void> {
   if (videoPlatforms.has(variant.platform) && !(variant.platform === 'bilibili' && variant.format === 'article') && !files.some(file => file.video)) throw new Error('This channel requires a real video file. A generated script is not a publishable video; attach an actual video first.');
 }
 export async function verifyDraftApproval(draft: Draft): Promise<void> {
+  if (draft.generationEvidenceRunId) { const { assertDraftQuality } = await import('./quality.ts'); const { taskWorkspaceId } = await import('./tasks.ts'); await assertDraftQuality(await taskWorkspaceId(), draft); }
   if (!draft.approvedHash || draft.approvedHash !== await draftHash(draft)) throw new Error('Draft content or media changed after approval. Review and approve it again.');
 }
 async function verifyApproval(draft: Draft, variant: Variant, account: Account, job?: Job): Promise<void> {
+  if (job?.automation) await (await import('./task-automation.ts')).verifyJobAutomation(job, account);
   assertAutomatedPublishingAllowed(draft, account);
   await verifyDraftApproval(draft);
   if (job && job.approvedHash !== targetHash(draft, variant, account)) throw new Error('Approved content revision or account target changed. Cancel this job and schedule the reviewed revision.');
 }
 
-export async function createDraft(briefInput: Brief, generatedInput: Generated, stableId?: string, generationModel?: string, generationContext?: { instruction: string; assetIds: string[]; knowledgeRef?: string }): Promise<Draft> {
+export async function createDraft(briefInput: Brief, generatedInput: Generated, stableId?: string, generationModel?: string, generationContext?: { instruction: string; assetIds: string[]; knowledgeRef?: string; evidenceRunId?: string; leaseToken?: string; refreshTarget?: { draftId: string; expectedRevision: number } }): Promise<Draft> {
   const brief = briefSchema.parse(briefInput);
   if (brief.knowledgeIds?.length && !generationContext?.knowledgeRef) throw new Error('Knowledge-backed drafts require their original immutable generation snapshot.');
+  const refresh = generationContext?.refreshTarget;
+  if (refresh && (!generationContext.evidenceRunId || !generationContext.leaseToken || stableId !== refresh.draftId || !Number.isInteger(refresh.expectedRevision) || refresh.expectedRevision < 1)) throw new Error('Evidence refresh requires its original draft revision and active production lease.');
+  if (brief.evidenceDocumentIds?.length && (!generationContext?.evidenceRunId || !generationContext.leaseToken || stableId !== (refresh?.draftId ?? generationContext.evidenceRunId))) throw new Error('Evidence-backed drafts require the original production run and its active lease.');
   const generated = canonicalArticle(validGenerated(brief, generatedInput));
-  const draft: Draft = { ...generated, id: stableId ? z.uuid().parse(stableId) : randomUUID(), brief, createdAt: now(), revision: 1, approvedHash: null, ...(generationModel !== undefined ? { generationModel: draftSchema.shape.generationModel.parse(generationModel) } : {}), ...(generationContext ? { generationInstruction: draftSchema.shape.generationInstruction.parse(generationContext.instruction), generationAssetIds: draftSchema.shape.generationAssetIds.parse(generationContext.assetIds), ...(generationContext.knowledgeRef ? { generationKnowledgeRef: z.uuid().parse(generationContext.knowledgeRef) } : {}) } : {}) };
-  const result = await mutateState(state => { const existing = state.drafts.find(item => item.id === draft.id); if (existing) return existing; state.drafts.push(draft); return draft; });
-  await writeDraftArtifacts(result);
-  return result;
-}
-export async function replaceDraft(id: string, generatedInput: Generated, expectedRevision?: number, operationId?: string, appliedProposalId?: string): Promise<Draft> {
-  generatedInput = canonicalArticle(generatedInput);
-  const previous = (await readState()).drafts.find(item => item.id === id);
-  if (previous) await writeDraftArtifacts(previous);
-  if (appliedProposalId && storageMode() === 'supabase') {
-    if (!previous || expectedRevision === undefined) throw new Error('A reviewed proposal requires its draft and base revision.');
-    const result = draftSchema.parse(await dbRpc('studio_apply_proposal', { p_workspace: z.uuid().parse(process.env.STUDIO_WORKSPACE_ID), p_operation: z.uuid().parse(appliedProposalId), p_draft: id, p_expected_revision: expectedRevision, p_content: validGenerated(previous.brief, generatedInput) }));
-    await writeDraftArtifacts(result);
-    return result;
+  const draft: Draft = { ...generated, id: stableId ? z.uuid().parse(stableId) : randomUUID(), brief, createdAt: now(), revision: 1, approvedHash: null, ...(generationModel !== undefined ? { generationModel: draftSchema.shape.generationModel.parse(generationModel) } : {}), ...(generationContext ? { ...(generationContext.evidenceRunId ? { generationEvidenceRunId: z.uuid().parse(generationContext.evidenceRunId) } : {}), generationInstruction: draftSchema.shape.generationInstruction.parse(generationContext.instruction), generationAssetIds: draftSchema.shape.generationAssetIds.parse(generationContext.assetIds), ...(generationContext.knowledgeRef ? { generationKnowledgeRef: z.uuid().parse(generationContext.knowledgeRef) } : {}) } : {}) };
+  if (refresh) {
+    const previous = (await readState()).drafts.find(item => item.id === refresh.draftId);
+    if (!previous || previous.revision !== refresh.expectedRevision && !(previous.revision === refresh.expectedRevision + 1 && previous.generationEvidenceRunId === generationContext?.evidenceRunId)) throw new Error('Draft revision changed during evidence refresh; preserve the owner edit.');
+    draft.createdAt = previous.createdAt; draft.revision = refresh.expectedRevision + 1;
   }
-  const result = await mutateState(state => {
-    const draft = findDraft(state, id);
-    if (operationId && draft.lastOperationId === operationId) return draft;
-    if (appliedProposalId && draft.lastAppliedProposalId === appliedProposalId) return draft;
-    if (expectedRevision !== undefined && draft.revision !== expectedRevision) throw new Error('Draft revision changed while this operation was running. Refresh the draft and retry.');
-    if (state.jobs.some(job => job.draftId === id && job.status === 'submitting')) throw new Error('This draft has an active provider submission. Reconcile its outcome before editing.');
-    const masterChanged = draft.title !== generatedInput.title || draft.body !== generatedInput.body || (generatedInput.document !== undefined && JSON.stringify(draft.document) !== JSON.stringify(generatedInput.document));
-    generatedInput.document ??= draft.body === generatedInput.body ? draft.document : documentFromText(generatedInput.body);
-    Object.assign(draft, validGenerated(draft.brief, generatedInput), { adaptationStatus: operationId ? 'current' : masterChanged ? 'pending' : draft.adaptationStatus, revision: draft.revision + 1, approvedHash: null, lastOperationId: operationId, ...(appliedProposalId ? { lastAppliedProposalId: appliedProposalId } : {}) });
-    return draft;
-  });
-  await writeDraftArtifacts(result);
-  return result;
+  return commitArticle(draft, { expectedRevision: refresh?.expectedRevision ?? 0, ...(stableId ? { commandId: generationContext?.evidenceRunId ?? stableId } : {}), ...(generationContext?.evidenceRunId && generationContext.leaseToken ? { productionLease: { runId: generationContext.evidenceRunId, token: generationContext.leaseToken } } : {}) });
+}
+export async function replaceDraft(id: string, generatedInput: Generated, expectedRevision?: number, operationId?: string, appliedProposalId?: string, commandId?: string, generationModel?: string): Promise<Draft> {
+  // The reviewed proposal is immutable, including whether older output contained a document.
+  const proposalContent = appliedProposalId ? generatedSchema.parse(generatedInput) : undefined;
+  generatedInput = canonicalArticle(generatedInput);
+  if (expectedRevision !== undefined) { const committed = await committedArticle(commandId, id, expectedRevision, generatedInput); if (committed) return committed; }
+  const previous = (await readState()).drafts.find(item => item.id === id);
+  if (!previous) throw new Error('Draft not found.');
+  if (operationId && previous.lastOperationId === operationId || appliedProposalId && previous.lastAppliedProposalId === appliedProposalId) return previous;
+  if (expectedRevision !== undefined && previous.revision !== expectedRevision) throw new Error('Draft revision changed while this operation was running. Refresh the draft and retry.');
+  const masterChanged = previous.title !== generatedInput.title || previous.body !== generatedInput.body || (generatedInput.document !== undefined && JSON.stringify(previous.document) !== JSON.stringify(generatedInput.document));
+  generatedInput.document ??= previous.body === generatedInput.body ? previous.document : documentFromText(generatedInput.body);
+  const draft = draftSchema.parse({ ...previous, ...validGenerated(previous.brief, generatedInput), ...(generationModel ? { generationModel } : {}), adaptationStatus: operationId ? 'current' : masterChanged ? 'pending' : previous.adaptationStatus, revision: previous.revision + 1, approvedHash: null, lastOperationId: operationId, ...(appliedProposalId ? { lastAppliedProposalId: appliedProposalId } : {}) });
+  return commitArticle(draft, { expectedRevision: previous.revision, commandId: commandId ?? operationId ?? appliedProposalId, proposalId: appliedProposalId, ...(proposalContent ? { proposalContent } : {}) });
 }
 export async function approveDraft(id: string, expectedRevision?: number): Promise<Draft> {
-  return mutateState(async state => { const draft = findDraft(state, id); if (expectedRevision !== undefined && expectedRevision !== draft.revision) throw new Error('Draft revision changed before approval.'); draft.approvedHash = await draftHash(draft); return draft; });
+  return mutateState(async state => { const draft = findDraft(state, id); if (expectedRevision !== undefined && expectedRevision !== draft.revision) throw new Error('Draft revision changed before approval.');
+    if (draft.generationEvidenceRunId) { const { assertDraftQuality } = await import('./quality.ts'); const { taskWorkspaceId } = await import('./tasks.ts'); await assertDraftQuality(await taskWorkspaceId(), draft); }
+    draft.approvedHash = await draftHash(draft); return draft; });
 }
 export async function addAccount(input: Omit<Account, 'id'>): Promise<Account> {
   const account = accountSchema.parse({ ...input, id: randomUUID() });
@@ -284,7 +285,11 @@ async function dispatchDue(): Promise<Job[]> {
       // A persistence failure after POST leaves submitting in the durable state, so restart requires reconciliation.
       results.push(await mutateState(state => { const job = findJob(state, id); job.providerPostId = remoteId; job.verificationCheck = createVerificationCheck(); transition(job, 'queued', 'Postiz accepted this job. Read-only verification will check its platform publication URL while publishing is enabled.'); return job; }));
     } finally { activeSubmissions.delete(id); }
-    }); } finally { activeSubmissions.delete(id); }
+    }); } catch (error) {
+      // Another job owns this account, or its accepted submission awaits readback.
+      // Keep its durable barrier and this job scheduled; other accounts may proceed.
+      if (!(error instanceof AccountExecutionBusyError)) throw error;
+    } finally { activeSubmissions.delete(id); }
   }
   return results;
 }
@@ -401,12 +406,21 @@ export async function recordMetrics(jobId: string, input: z.infer<typeof metrics
   return mutateState(state => { const job = findJob(state, jobId); if (!['published', 'delivered'].includes(job.status)) throw new Error('Record performance only after a confirmed publication or processed upload.'); job.metrics.push({ ...metrics, at: now() }); return job; });
 }
 
-export async function preparePublication(input: { draftId: string; accountId: string; expectedRevision: number; automatic: boolean }): Promise<Job> {
-  return mutateState(async state => {
+export async function assertExistingPublicationAction(jobs: Job[], variant: Variant, account: Account, automatic: boolean): Promise<void> {
+  const candidates = jobs.filter(job => job.accountId === account.id && job.deliveryAction !== 'save_draft' && job.status !== 'cancelled');
+  if (!candidates.length) return;
+  const key = await contentKey(variant, account);
+  const previous = candidates.find(job => job.contentHash === key);
+  if (previous) assertPublicationAction(previous, automatic, { journalExists: await hasYouTubeUploadJournal(previous) });
+}
+export async function preparePublication(input: { draftId: string; accountId: string; expectedRevision: number; automatic: boolean; scheduledAt?: string; automation?: Job['automation']; jobId?: string }): Promise<Job> {
+  const requestedSchedule = input.scheduledAt ? z.iso.datetime().parse(input.scheduledAt) : undefined;
+  const prepared = await mutateState(async state => {
     const draft = findDraft(state, input.draftId); const account = findAccount(state, input.accountId); const variant = variantFor(draft, account.platform);
     if (draft.revision !== input.expectedRevision) throw new Error('The draft changed. Review the current revision before publishing.');
     await verifyDraftApproval(draft);
     const key = await contentKey(variant, account);
+    if (input.jobId && state.jobs.some(job => job.id === input.jobId && (job.accountId !== account.id || job.contentHash !== key || job.status === 'cancelled'))) throw new Error('Delivery command changed.');
     let previous = state.jobs.find(job => job.accountId === account.id && job.contentHash === key && job.status !== 'cancelled');
     if (!previous) {
       for (const candidate of state.jobs.filter(job => job.accountId === account.id && job.contentHash === key && job.status === 'cancelled')) {
@@ -416,8 +430,22 @@ export async function preparePublication(input: { draftId: string; accountId: st
       }
     }
     if (previous) {
+      if (requestedSchedule && Date.parse(previous.scheduledAt) !== Date.parse(requestedSchedule)) throw new DeliveryInputError('相同内容已有其他发布时间的交付，请先处理原任务，不能通过重新提交覆盖排期。');
+      if (!requestedSchedule && !previous.automation && Date.parse(previous.scheduledAt) > Date.now()) throw new DeliveryInputError('相同内容已有未来排期，请打开原交付核对，不能通过立即发布覆盖排期。');
       const safeUnsent = ['scheduled', 'failed'].includes(previous.status) && !previous.providerPostId && !previous.remoteId && !previous.remoteUrl;
       const journalExists = await hasYouTubeUploadJournal(previous);
+      // Persist recovery of a cancelled journal before reporting the uncertain outcome.
+      if (['submitting', 'needs_reconciliation'].includes(previous.status)) return previous;
+      assertPublicationAction(previous, input.automatic, { automation: input.automation, journalExists });
+      // Explicit publication of a reviewed revision may take over an unsent
+      // rule-owned job. Uncertain/accepted submissions retain their original authority.
+      if (previous.automation && !input.automation && safeUnsent && !journalExists) {
+        const authority = previous.automation;
+        delete previous.automation;
+        previous.scheduledAt = requestedSchedule ?? now();
+        transition(previous, input.automatic ? 'scheduled' : 'awaiting_operator', `Operator reviewed revision ${draft.revision} and replaced task authorization ${JSON.stringify(authority)} before submission.`);
+        return previous;
+      }
       if (previous.approvedHash === targetHash(draft, variant, account) || !safeUnsent || journalExists) return previous;
       transition(previous, 'cancelled', 'Superseded by a newly reviewed revision before confirmed remote acceptance. The old immutable snapshot remains in history.');
     }
@@ -430,9 +458,16 @@ export async function preparePublication(input: { draftId: string; accountId: st
         if (account.provider === 'postiz') validatePostizVariant(account, variant);
       } catch (error) { status = 'failed'; message = error instanceof Error ? error.message : 'Publishing preflight failed.'; }
     }
-    const job: Job = { id: randomUUID(), draftId: draft.id, platform: account.platform, accountId: account.id, approvedHash: targetHash(draft, variant, account), contentHash: key, snapshot: structuredClone({ draft, account, variant }), status, scheduledAt: now(), createdAt: now(), provider: account.provider, providerPostId: null, remoteId: null, remoteUrl: null, attempts: 0, submissionOwner: null, submissionStartedAt: null, metrics: [], error: status === 'failed' ? message : null, history: [{ at: now(), status, message }] };
+    const job: Job = { id: input.jobId ? z.uuid().parse(input.jobId) : randomUUID(), draftId: draft.id, platform: account.platform, accountId: account.id, approvedHash: targetHash(draft, variant, account), contentHash: key, snapshot: structuredClone({ draft, account, variant }), status, scheduledAt: now(), createdAt: now(), provider: account.provider, providerPostId: null, remoteId: null, remoteUrl: null, attempts: 0, submissionOwner: null, submissionStartedAt: null, metrics: [], error: status === 'failed' ? message : null, history: [{ at: now(), status, message }] };
+    if (requestedSchedule) job.scheduledAt = requestedSchedule;
+    if (input.automation) {
+      job.automation = input.automation;
+      job.history.push({ at: now(), status, message: `Task publication authority: ${JSON.stringify(input.automation)}` });
+    }
     state.jobs.push(job); return job;
   });
+  if (['submitting', 'needs_reconciliation'].includes(prepared.status)) assertPublicationAction(prepared, input.automatic);
+  return prepared;
 }
 export async function retryFailedPublication(id: string): Promise<Job> {
   return mutateState(async state => {

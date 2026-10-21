@@ -1,0 +1,166 @@
+.studio-companion {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--studio-ink);
+  background: #f8faff;
+  min-height: 520px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.studio-companion header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.studio-companion header > div {
+  flex: 1;
+  min-width: 0;
+}
+.studio-companion h1 {
+  font-size: 16px;
+  font-weight: 750;
+  margin: 0;
+}
+.studio-companion header p {
+  font-size: 11px;
+  margin: 4px 0;
+  color: var(--studio-muted);
+}
+.studio-companion h2 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+.studio-companion h3 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 16px 0 8px;
+}
+.studio-companion p {
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 8px 0;
+}
+.studio-companion nav {
+  display: flex;
+  gap: 5px;
+  background: #edf2fa;
+  padding: 4px;
+  border-radius: 9px;
+}
+.studio-companion nav button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+}
+.studio-companion nav button.active {
+  background: #fff;
+  color: var(--studio-brand);
+  box-shadow: 0 1px 4px #172a4712;
+}
+.studio-companion section {
+  border: 1px solid var(--studio-line);
+  border-radius: var(--studio-radius);
+  background: #fff;
+  padding: 15px;
+}
+.studio-companion article {
+  border-bottom: 1px solid var(--studio-line);
+  padding: 12px 0;
+}
+.studio-companion article:last-child {
+  border-bottom: 0;
+}
+.studio-companion strong {
+  font-size: 13px;
+}
+.studio-companion button {
+  border: 1px solid var(--studio-line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 12px;
+  min-height: 36px;
+  cursor: pointer;
+}
+.studio-companion button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.studio-companion button:focus-visible {
+  outline: 2px solid var(--studio-focus);
+  outline-offset: 2px;
+}
+.studio-companion .studio-primary {
+  background: var(--studio-brand);
+  color: #fff;
+  border-color: var(--studio-brand);
+}
+.studio-companion label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  margin: 12px 0;
+}
+.studio-companion input,
+.studio-companion select,
+.studio-companion textarea {
+  border: 1px solid var(--studio-line);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+  width: 100%;
+  background: #fff;
+}
+.studio-companion footer {
+  margin-top: auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.studio-companion .studio-error {
+  color: var(--studio-danger);
+  padding: 10px;
+  background: #fff0f2;
+  border-radius: 7px;
+}
+.studio-companion .studio-notice {
+  color: var(--studio-success);
+  padding: 10px;
+  background: #eaf7f0;
+  border-radius: 7px;
+}
+.studio-companion .studio-help {
+  color: var(--studio-muted);
+  font-size: 11px;
+}
+.studio-companion ol {
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.studio-companion .studio-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.studio-companion details {
+  border: 1px solid var(--studio-line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+  font-size: 12px;
+}
+.studio-companion summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.studio-companion .studio-updates button {
+  margin: 4px 6px 4px 0;
+}
+.studio-companion article button + button {
+  margin-left: 6px;
+}

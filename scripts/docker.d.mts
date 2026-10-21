@@ -1,4 +1,5 @@
 export function copyBackupTrees(sourceRoot: string, destination: string): Promise<void>;
+export function assertKnowledgeBuildCapacity(availableBytes: number): void;
 export function writeBackupDestination<T>(destination: string, writer: () => Promise<T>): Promise<T>;
 export function youtubeAuthorizationNotice(line: string): { authorizationUrl: string; nextAction: string } | null;
 export function prepareDraftBridgeDirectory(bindRoot: string, uid: number, gid: number): Promise<void>;
@@ -6,3 +7,8 @@ export function prepareKnowledgeDirectory(bindRoot: string, uid: number, gid: nu
 export function validateKnowledgeSource(value: unknown): Promise<string>;
 export function modelLoginMethod(argv: string[]): 'device' | 'browser';
 export function modelLoginCommand(method: 'device' | 'browser', name?: string, helperPath?: string): string[];
+export function verifyPortableBackup(folder: string): Promise<{ verifiedFiles: number }>;
+export type RuntimeOrchestrator = { version: 1; orchestrator: 'kubernetes' | 'compose'; phase: 'active' | 'stopped'; images: { application: string; model: string; renderer: string; tts: string }; namespace?: string; context?: string; workspaceId?: string; updatedAt?: string };
+export function readRuntimeOrchestrator(bindRoot: string): Promise<RuntimeOrchestrator | null>;
+export function assertComposeAction(bindRoot: string, command: string): Promise<void>;
+export function restoreRuntimeOrchestrator(bindRoot: string): Promise<void>;

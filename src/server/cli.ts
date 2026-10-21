@@ -1,6 +1,7 @@
 import { loadRuntimeEnvironment } from '../core/runtime-env.ts';
-import { readFile, mkdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve, sep } from 'node:path';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { registerGeneratedAsset } from '../core/assets.ts';
 import { z } from 'zod';
 import { briefSchema, generatedSchema, platformSchema, accountSchema } from '../core/model.ts';
 import { doctor } from '../core/doctor.ts';
@@ -78,10 +79,9 @@ try {
       const draft = (await readState()).drafts.find(item => item.id === id); if (!draft) throw new Error('Draft not found');
       await verifyDraftApproval(draft);
       const media = await buildMedia(draft, platform);
-      try {
-      const updated = await replaceDraft(id, { title: draft.title, body: draft.body, variants: draft.variants.map(variant => variant.platform === platform ? { ...variant, mediaPaths: media.files.filter(file => /\.(png|jpg|jpeg|mp4)$/i.test(file)) } : variant) }, draft.revision);
+      const assets = await Promise.all(media.files.filter(file => /\.(png|jpg|jpeg|mp4)$/i.test(file)).map(registerGeneratedAsset));
+      const updated = await replaceDraft(id, { title: draft.title, body: draft.body, variants: draft.variants.map(variant => variant.platform === platform ? { ...variant, mediaPaths: assets.map(asset => `studio-asset:${asset.id}`) } : variant) }, draft.revision);
       result = { ...media, draft: updated, nextAction: 'Review assets and approve the updated revision before scheduling.' };
-      } catch (error) { const firstFile=media.files[0]; const root=resolve(process.env.STUDIO_DATA_DIR ?? '.studio','media'); if(firstFile && dirname(firstFile).startsWith(`${root}${sep}`)) await rm(dirname(firstFile),{recursive:true,force:true}); throw error; }
       break;
     }
     case 'export': {

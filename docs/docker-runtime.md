@@ -1,6 +1,8 @@
 # Portable Docker runtime and delivery
 
-Date: 2026-10-11. This record supersedes the native runtime target; previous publication evidence remains historical. All deployed services run in Compose. Only Docker/Compose, a shell, this repository and a private bind root are required on the host. No launchd, macOS speech, host Codex/Node/Supabase CLI, Keychain or fixed user path is required.
+当前单实例升级与验收记录见 [2026-10-19 统一环境](unified-runtime-2026-10-19.zh-CN.md)。当前入口为 `http://127.0.0.1:4310`；旧隔离验收地址仅为历史记录。
+
+Updated: 2026-10-15. This record supersedes the native runtime target; previous publication evidence remains historical. Compose remains the portable baseline and recovery runtime. The accepted owner deployment now runs applications on OrbStack Kubernetes and retains the original Compose Supabase. Follow the [Kubernetes lifecycle](orbstack-kubernetes.zh-CN.md) for that instance; direct Compose start is blocked while Kubernetes owns it. Only container tooling, a shell, this repository and a private bind root are required on the host. No launchd, macOS speech, host Codex/Node/Supabase CLI, Keychain or fixed user path is required. See [latest acceptance](acceptance.md) for the executed cutover and restore checks.
 
 ## Supported lifecycle
 

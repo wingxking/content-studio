@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { refreshModelCatalog } from '../core/model-catalog.ts';
+import type { GenerationUsage } from '../core/generation-engine.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -35,8 +36,9 @@ app.post('/execute', async (req, res) => {
       if (bytes.length > 24 * 1024 * 1024 || total > 48 * 1024 * 1024) throw new Error('Reference image budget exceeded.');
       const path = join(directory, `image-${index}`); await writeFile(path, bytes, { mode: 0o600 }); paths.push(path);
     }
-    const result = await runStructuredGeneration(z.unknown(), input.prompt, { model: input.model, outputSchema: input.schema, imagePaths: paths, search: input.search, timeoutMs: input.timeoutMs, signal: controller.signal });
-    res.json({ result });
+    let usage: GenerationUsage | undefined;
+    const result = await runStructuredGeneration(z.unknown(), input.prompt, { model: input.model, outputSchema: input.schema, imagePaths: paths, search: input.search, timeoutMs: input.timeoutMs, signal: controller.signal, onUsage: async value => { usage = value; } });
+    res.json({ result, usage });
   } catch (error) { if (!res.headersSent) res.status(400).json({ error: error instanceof Error ? error.message : 'Model execution failed.' }); }
   finally { active = false; if (directory) await rm(directory, { recursive: true, force: true }); }
 });

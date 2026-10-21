@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { platformIds, platformSchema, sourceSchema, variantSchema } from './model.ts';
 import { knowledgeIdsSchema } from './knowledge-model.ts';
+import { brandProfileSchema } from '../contracts/brand.ts';
+import { hasAutomaticDelivery, taskAuthorizationSchema, taskDeliverySchema } from '../contracts/task-automation.ts';
+import { sourcePreferenceSchema, researchPolicySchema, qualityPolicySchema, publicSourceUrl } from '../contracts/research.ts';
 
 export const taskSourceSchema = z.object({
   title: z.string().max(300).default(''),
@@ -26,16 +29,36 @@ export const taskInputSchema = z.object({
   model: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u),
   platforms: z.array(platformSchema).min(1).max(platformIds.length).refine(values => new Set(values).size === values.length, 'Platforms must be unique'),
   sources: z.array(taskSourceSchema).max(20).default([]),
+  pipelineVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+  sourcePreferences: z.array(sourcePreferenceSchema).max(30).refine(values => new Set(values.map(item => item.id)).size === values.length, 'Source identities must be unique').optional(),
+  researchPolicy: researchPolicySchema.optional(), qualityPolicy: qualityPolicySchema.optional(),
   assetIds: z.array(z.uuid()).max(12).default([]),
   knowledgeIds: knowledgeIdsSchema.default([]),
   discoveryAutomation: z.object({ enabled: z.boolean().default(false), maxDrafts: z.number().int().min(1).max(3).default(1) }).default({ enabled: false, maxDrafts: 1 }),
+  discoveryConfig: z.object({ countries: z.array(z.string().trim().min(2).max(80)).max(20), freshnessHours: z.union([z.literal(4), z.literal(24), z.literal(168)]), maxQuestions: z.number().int().min(1).max(20) }).optional(),
+  draftSync: z.object({ enabled: z.boolean(), accountIds: z.array(z.uuid()).max(20) }).optional(),
+  brand: brandProfileSchema.optional(),
+  delivery: taskDeliverySchema.optional(),
+  sourceRunId: z.uuid().optional(),
   kind: z.enum(['content', 'discovery']),
   topicOrigin: z.enum(['editorial', 'trend']).default('trend'),
   frequency: taskFrequencySchema,
   enabled: z.boolean(),
-}).superRefine((value, context) => { if (value.kind === 'content' && value.discoveryAutomation.enabled) context.addIssue({ code: 'custom', path: ['discoveryAutomation', 'enabled'], message: 'Content tasks cannot enable discovery automation.' }); });
+}).superRefine((value, context) => {
+  if (value.pipelineVersion === 2) value.sources.forEach((source, index) => { if (source.url && !publicSourceUrl.safeParse(source.url).success) context.addIssue({ code: 'custom', path: ['sources', index, 'url'], message: 'Evidence research source links must not contain credentials.' }); });
+  if (value.pipelineVersion === 2 && hasAutomaticDelivery(value.delivery)) context.addIssue({ code: 'custom', path: ['delivery'], message: 'Evidence production requires a human publication action. Select draft or manual delivery.' });
+  if (value.kind === 'content' && value.discoveryAutomation.enabled) context.addIssue({ code: 'custom', path: ['discoveryAutomation', 'enabled'], message: 'Content tasks cannot enable discovery automation.' });
+  if (value.delivery && hasAutomaticDelivery(value.delivery)) {
+    if (value.enabled && !value.delivery.authorized) context.addIssue({ code: 'custom', path: ['delivery', 'authorized'], message: 'Explicitly authorize this task and its selected accounts before automatic publication.' });
+    if (value.kind !== 'content') context.addIssue({ code: 'custom', path: ['delivery'], message: 'Automatic public release requires a content task with an explicit topic; discovery can automatically save drafts.' });
+    if (value.frequency.type === 'once' && !value.delivery.onceAt) context.addIssue({ code: 'custom', path: ['delivery', 'onceAt'], message: 'Choose the publication date and time.' });
+    if (value.frequency.type !== 'once' && value.delivery.dayOffset === 0 && value.delivery.publicationTime <= value.frequency.time) context.addIssue({ code: 'custom', path: ['delivery', 'publicationTime'], message: 'Publication must follow production.' });
+    if (value.frequency.onceAt && value.delivery.onceAt && Date.parse(value.delivery.onceAt) <= Date.parse(value.frequency.onceAt)) context.addIssue({ code: 'custom', path: ['delivery', 'onceAt'], message: 'Publication must follow production.' });
+  }
+});
 export const taskSchema = taskInputSchema.safeExtend({
   id: z.uuid(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), nextRunAt: z.iso.datetime().nullable(),
+  authorization: taskAuthorizationSchema.optional(),
 });
 export type TaskInput = z.infer<typeof taskInputSchema>;
 export type Task = z.infer<typeof taskSchema>;
@@ -53,8 +76,10 @@ export const taskRunStatuses = ['queued', 'researching', 'generating', 'succeede
 export const taskRunSchema = z.object({
   id: z.uuid(), taskId: z.uuid(), slot: z.string(), taskSnapshot: taskSchema,
   status: z.enum(taskRunStatuses), phase: z.string(), progress: z.number().min(0).max(100), attempt: z.number().int().nonnegative(),
+  guidanceVersion: z.string().optional(),
   error: z.string().nullable(), warnings: z.array(z.string()).default([]), questions: z.array(hotQuestionSchema).max(20), sources: z.array(sourceSchema).max(20),
   master: masterSchema.nullable(), variants: z.array(variantSchema).max(platformIds.length), draftId: z.uuid().nullable(), outputPaths: outputPathsSchema.nullable(),
   startedAt: z.iso.datetime().nullable(), finishedAt: z.iso.datetime().nullable(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
+  refreshTarget: z.object({ draftId: z.uuid(), expectedRevision: z.number().int().positive(), reason: z.string() }).optional(),
 });
 export type TaskRun = z.infer<typeof taskRunSchema>;

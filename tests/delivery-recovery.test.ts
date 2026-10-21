@@ -175,7 +175,8 @@ test('continuing journal-only failure enters reconciliation without a new operat
 test('a legacy cancelled journal prevents creating a duplicate publication', async () => {
   const { job, accountId, draftId } = await journalOnlyFixture();
   await mutateState(state => { const saved = state.jobs.find(item => item.id === job.id); assert.ok(saved); saved.status = 'cancelled'; });
-  const reused = await preparePublication({ draftId, accountId, expectedRevision: 1, automatic: false });
+  await assert.rejects(preparePublication({ draftId, accountId, expectedRevision: 1, automatic: false }), /核对原任务/u);
+  const reused = (await readState()).jobs.find(item => item.id === job.id)!;
   assert.equal(reused.id, job.id); assert.equal(reused.status, 'needs_reconciliation'); assert.equal((await readState()).jobs.length, 1);
 });
 

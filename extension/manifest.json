@@ -1,0 +1,89 @@
+{
+  "manifest_version": 3,
+  "name": "Content Studio",
+  "description": "Content Studio 本地内容工作台：账号核验、文章草稿同步与任务回执",
+  "version": "2.0.13",
+  "icons": {
+    "16": "assets/icon-16.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "action": {
+    "default_icon": "assets/icon-48.png",
+    "default_popup": "src/popup/index.html"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "cookies",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "scripting",
+    "tabs",
+    "alarms",
+    "contextMenus",
+    "downloads"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mp.weixin.qq.com/s/*",
+        "https://mp.weixin.qq.com/s?*"
+      ],
+      "js": [
+        "src/content/weixin.ts"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://mp.weixin.qq.com/cgi-bin/appmsg*"
+      ],
+      "js": [
+        "src/content/weixin-editor.ts"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://mp.toutiao.com/*"
+      ],
+      "js": [
+        "src/content/toutiao.ts"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/content/extractor.ts"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/*",
+        "src/editor/index.html",
+        "src/sync-dialog/index.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "version_name": "2.0.13",
+  "minimum_chrome_version": "120"
+}

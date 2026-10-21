@@ -2,6 +2,7 @@ import { markAccountDispatch, markAccountRejected, withAccountExecution, account
 import { z } from 'zod';
 import { assertXText } from './text-limits.ts';
 import { validateRedditTarget } from './publishing-capabilities.ts';
+import { DeliveryInputError } from './delivery-errors.ts';
 import type { Account, Job, Variant } from './model.ts';
 
 const integrationSchema = z.object({ id: z.string().min(1), name: z.string(), identifier: z.string(), disabled: z.boolean().optional() });
@@ -41,13 +42,16 @@ export function canonicalPostizContent(variant: Variant): string {
   return `${variant.text}${tags.length ? `\n\n${tags.join(' ')}` : ''}`;
 }
 export function validatePostizVariant(account: Account, variant: Variant): void {
-  if (!['x', 'linkedin', 'reddit'].includes(account.platform)) throw new Error('Automatic Postiz publishing currently supports text X, LinkedIn and approved Reddit self posts. Use native handoff for this platform.');
-  if (variant.mediaPaths.length) throw new Error('Postiz media upload is not configured. Use native handoff with the original files.');
-  if (!account.integrationId) throw new Error('A verified Postiz integration ID is required.');
+  if (!['x', 'linkedin', 'reddit'].includes(account.platform)) throw new DeliveryInputError('当前 Postiz 连接仅支持 X、LinkedIn 和已获准的 Reddit 文字帖，请选择手动交付。', 'UNSUPPORTED_ACTION');
+  if (variant.mediaPaths.length) throw new DeliveryInputError('当前 Postiz 连接尚未配置媒体上传，请移除媒体或选择手动交付原文件。', 'UNSUPPORTED_FORMAT');
+  if (!account.integrationId) throw new DeliveryInputError('请先核验 Postiz integration ID 并连接目标账号。', 'AUTHORIZATION_REQUIRED');
   const content = canonicalPostizContent(variant);
-  if (account.platform === 'reddit') { validateRedditTarget(account); if (variant.title.length < 2 || variant.title.length > 300 || content.length > 40000) throw new Error('Reddit requires a 2–300 character title and at most 40000 characters of text.'); }
-  if (account.platform === 'x') assertXText(content);
-  if (account.platform === 'linkedin' && content.length > 3000) throw new Error('LinkedIn text and tags exceed 3000 characters.');
+  if (account.platform === 'reddit') {
+    try { validateRedditTarget(account); } catch { throw new DeliveryInputError('请在账号设置中核验 Reddit App、社区规则与必需的 flair。', 'AUTHORIZATION_REQUIRED'); }
+    if (variant.title.length < 2 || variant.title.length > 300 || content.length > 40000) throw new DeliveryInputError('Reddit 标题须为 2–300 字符，正文与标签最多 40000 字符。', 'CONTENT_INVALID');
+  }
+  if (account.platform === 'x') { try { assertXText(content); } catch { throw new DeliveryInputError('X 正文与标签最多 280 加权字符；中文和 emoji 按双字符计数，链接按 23 字符计数。', 'CONTENT_INVALID'); } }
+  if (account.platform === 'linkedin' && content.length > 3000) throw new DeliveryInputError('LinkedIn 正文与标签超过 3000 字符，请缩短后重新检查。', 'CONTENT_INVALID');
 }
 async function createPostizPostOwned(job: Job, account: Account, variant: Variant, integration: Integration, type: 'now' | 'draft'): Promise<string> {
   if (integration.id !== account.integrationId || integration.disabled || !matchesPlatform(integration, account) || variant.platform !== account.platform) throw new Error('Postiz integration and content must match the selected platform account.');

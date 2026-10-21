@@ -7,7 +7,7 @@ import test from 'node:test';
 import express from 'express';
 import { KnowledgeStore, inspectKnowledgeText, knowledgeLimits } from '../src/core/knowledge.ts';
 import { buildKnowledgeEvidencePrompt } from '../src/core/content-prompts.ts';
-import { briefSchema, emptyState } from '../src/core/model.ts';
+import { briefSchema, draftSchema, emptyState } from '../src/core/model.ts';
 import { taskInputSchema, taskSchema } from '../src/core/task-model.ts';
 import { configureTaskRuntime, processTaskRun } from '../src/core/tasks.ts';
 import { resolveGenerationContext } from '../src/core/generation-context.ts';
@@ -142,6 +142,13 @@ test('knowledge-only task creates a draft and retries the same snapshot without 
     globalThis.fetch = async (request, init) => {
       const url = String(request); const body = (init?.body ? JSON.parse(String(init.body)) : {}) as Record<string, unknown>;
       if (init?.body) writes.push(String(init.body));
+      if (url.includes('/rpc/studio_commit_article')) {
+        const draft = draftSchema.parse(body.p_content); const previous = state.drafts.find(item => item.id === draft.id);
+        if (previous && body.p_expected_revision === 0) return Response.json(previous);
+        assert.equal(previous?.revision ?? 0, body.p_expected_revision);
+        state.drafts = [...state.drafts.filter(item => item.id !== draft.id), draft]; revision++;
+        return Response.json(draft);
+      }
       if (url.includes('/rpc/studio_claim_task_run')) { row = { ...row, status: 'researching', attempt: Number(row.attempt) + 1 }; return Response.json(row); }
       if (url.includes('/rpc/studio_patch_task_run')) { const patch = body.p_patch as Record<string, unknown>; row = { ...row, ...Object.fromEntries(Object.entries(patch).map(([key, value]) => [key === 'draftId' ? 'draft_id' : key === 'outputPaths' ? 'output_paths' : key, value])) }; return Response.json(row); }
       if (url.includes('/studio_task_runs?')) return Response.json([row]);

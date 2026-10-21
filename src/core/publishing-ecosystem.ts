@@ -19,8 +19,8 @@ export function publishingEcosystem(): EcosystemRoute[] {
     {
       id: 'wechatsync_articles', name: 'WechatSync：公众号、知乎、B 站专栏草稿', kind: 'native_draft', status: 'implemented',
       platforms: ['wechat', 'zhihu', 'bilibili'], docsUrl: 'https://github.com/wechatsync/Wechatsync/tree/a98e42865387285afcc027c61836488748f3b30f',
-      setupSteps: ['在指定 Chrome 配置文件安装并核对扩展权限，登录目标平台。', '连接本地受保护网关，刷新扩展账号并绑定实际身份。', '选择已审阅的文章版本保存草稿，再打开平台核对正文、图片和草稿标识。'],
-      limitations: ['传输适配器已接入；真实账号草稿验收尚未完成，仍需扩展配对、实际登录与逐账号验证。', '已审计扩展 2.0.9 / 上游提交 a98e428；仅公开的 weixin、zhihu、bilibili 文章适配器。', '扩展读取当前浏览器会话；登录失效、扫码或验证仍需账号所有者处理。', '适配器成功回报不等于平台独立回读，更不等于公开发布；结果不明时先到草稿箱核对，不能自动重发。', '上游根许可证 GPL-3.0，CLI/MCP 清单为 MIT；当前按独立组件边界使用，不复制私有适配器。'],
+      setupSteps: ['构建本项目 extension，在指定 Chrome 配置文件加载 extension/dist 并核对权限，登录目标平台。', '连接本地受保护网关，刷新扩展账号并绑定实际身份。', '选择已审阅的文章版本保存草稿，再打开平台核对正文、图片和草稿标识。'],
+      limitations: ['传输适配器已接入；真实账号草稿验收尚未完成，仍需扩展配对、实际登录与逐账号验证。', '本项目还原的 2.0.9 扩展增加 Studio 草稿协议 v1；此入口仅启用已审阅的 weixin、zhihu、bilibili 文章适配器。', '扩展读取当前浏览器会话；登录失效、扫码或验证仍需账号所有者处理。', '适配器成功回报不等于平台独立回读，更不等于公开发布；结果不明时先到草稿箱核对，不能自动重发。', '扩展以 GPL-3.0 独立工程保留来源记录；其余还原适配器没有因此开放到 Studio。'],
     },
     {
       id: 'postiz_staging', name: 'Postiz：服务商审稿草稿', kind: 'provider_draft', status: 'implemented',

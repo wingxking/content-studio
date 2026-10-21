@@ -21,7 +21,7 @@ const sources: Partial<Record<Platform, string[]>> = {
   reddit: ['https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy', 'https://docs.postiz.com/public-api/providers/reddit'],
   producthunt: ['https://api.producthunt.com/v2/docs', 'https://help.producthunt.com/en/articles/479557-how-to-post-a-product'],
   wechat: ['https://developers.weixin.qq.com/doc/service/api/public/api_freepublish_submit', 'https://github.com/wechatsync/Wechatsync'],
-  zhihu: ['https://github.com/wechatsync/Wechatsync'], bilibili: ['https://open.bilibili.com/'],
+  zhihu: ['https://www.zhihu.com/playground/zhihu-publisher', 'https://github.com/zhihu/ZhihuPublisher', 'https://github.com/wechatsync/Wechatsync'], bilibili: ['https://open.bilibili.com/'],
   xiaohongshu: ['https://www.xiaohongshu.com/protocols/agreements'],
 };
 const formats: Partial<Record<Platform, string>> = { reddit: '社区文字帖', producthunt: '产品上线资料', wechat: '公众号文章', zhihu: '知乎专栏文章', xiaohongshu: '图文笔记', bilibili: '专栏文章 / 独立视频' };
@@ -52,7 +52,7 @@ export function publishingCapability(platform: Platform, kind: ContentKind, acco
   if (['xueqiu', 'gelonghui', 'guba'].includes(platform)) { capability.automatic = false; capability.remoteDraft = false; capability.blockers.push('Finance pilot disabled. Original fixture code is implemented; live account permission, page adapter and remote acceptance remain unverified.'); }
   if (platform === 'producthunt') capability.blockers.push('仅产品上线资料；需要真实产品网址和个人账号 onboarding。默认 API 只读；本项目没有创建产品的写入适配器。');
   if (platform === 'wechat') capability.blockers.push('官方发布权限须逐账号检查；个人及部分未认证账号无法使用群发接口。可连接受支持的扩展保存文章草稿，公开发布仍在平台人工完成。');
-  if (platform === 'zhihu') capability.blockers.push('当前提供专栏稿件与原生编辑器；未安装或未验证扩展时，不宣称已同步远端草稿。');
+  if (platform === 'zhihu') capability.blockers.push('官方 Zhihu Publisher 需申请测试资格与 OpenAPI 凭证，并核验预览确认要求；当前未接入该公开发布通道，可显式选择同步专栏草稿；公开发布仍需人工完成。');
   if (platform === 'xiaohongshu') capability.blockers.push('核对账号类别、内容资格及 AI 标识；本项目没有获准的自动发布连接。');
   if (platform === 'bilibili') capability.blockers.push('专栏文章与视频入口不同；自动投稿需官方应用审核及账号授权。');
   if (kind === 'article' && ['wechat', 'zhihu', 'bilibili'].includes(platform) && (!account || account.provider === 'native')) {

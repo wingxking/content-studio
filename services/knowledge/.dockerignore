@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!preload.py
+!export_models.py
+!server.py
+!sync.py
+!models.lock.json

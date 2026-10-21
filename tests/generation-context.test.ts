@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { z } from 'zod';
-import { draftDirectory } from '../src/core/artifacts.ts';
+import { draftDirectory, writeDraftArtifacts } from '../src/core/artifacts.ts';
 import { describeEditorialAssessment } from '../src/core/generation-engine.ts';
 import { createOperation } from '../src/core/editor.ts';
-import { emptyState, type StudioState } from '../src/core/model.ts';
+import { draftSchema, emptyState, type StudioState } from '../src/core/model.ts';
 import { approveDraft, createDraft, replaceDraft, verifyDraftApproval } from '../src/core/pipeline.ts';
 import { readState } from '../src/core/store.ts';
 
@@ -25,6 +25,13 @@ beforeEach(async () => {
   process.env.STUDIO_DATA_DIR = directory; process.env.SUPABASE_URL = 'http://127.0.0.1:54321'; process.env.SUPABASE_SECRET_KEY = 'fixture-only'; process.env.STUDIO_WORKSPACE_ID = workspace;
   globalThis.fetch = async (request, init) => {
     const url = new URL(String(request)); const body = init?.body ? z.record(z.string(), z.unknown()).parse(JSON.parse(String(init.body))) : {};
+    if (url.pathname.endsWith('/rpc/studio_commit_article')) {
+      const draft = draftSchema.parse(body.p_content); const previous = state.drafts.find(item => item.id === draft.id);
+      if (previous && body.p_expected_revision === 0) return Response.json(previous);
+      assert.equal(previous?.revision ?? 0, body.p_expected_revision);
+      state.drafts = [...state.drafts.filter(item => item.id !== draft.id), draft]; revision++;
+      return Response.json(draft);
+    }
     if (url.pathname.endsWith('/content_studio_workspaces')) {
       if (init?.method === 'PATCH') { state = z.object({ state: z.unknown() }).parse(body).state as StudioState; revision++; }
       return Response.json([{ id: workspace, state, revision }]);
@@ -62,6 +69,8 @@ test('new task draft context survives later revisions and supplies sync/refine w
 
 test('legacy exact completed-run context is copied into the operation without rewriting immutable snapshots', async () => {
   const draft = await createDraft(brief, generated, randomUUID(), 'model-test');
+  // Seed the independently completed export: database commits no longer perform filesystem work.
+  await writeDraftArtifacts(draft);
   const snapshotPath = join(draftDirectory(draft.id), 'revision-1', 'content.json');
   const before = await readFile(snapshotPath);
   linkedRuns = [{ id: draft.id, draft_id: draft.id, task_snapshot: { prompt: instruction, assetIds: [assetId], model: 'model-test' } }];

@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+# This reviewable template has zero replicas and placeholder mount paths.
+# scripts/kubernetes.sh generates the runnable, private overlay under the bind root.

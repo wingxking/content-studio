@@ -1,10 +1,12 @@
 import { markAccountDispatch } from './account-execution.ts';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { readDraftBridgeConfig, saveDraftBridgeConfig, draftBridgeConfigSchema } from './draft-bridge-config.ts';
 import { mutateState, readState } from './store.ts';
 import { type Account, type Job, type Platform } from './model.ts';
 import { publishingEcosystem } from './publishing-ecosystem.ts';
+import { draftJournalStatusSchema } from '../contracts/draft-executor.ts';
+import { DeliveryInputError } from './delivery-errors.ts';
 
 export const nativeDraftPlatforms = ['wechat', 'zhihu', 'bilibili'] as const;
 export const nativeDraftPlatformSchema = z.enum(nativeDraftPlatforms);
@@ -24,7 +26,7 @@ function bridgeBase(): string {
   if (!['127.0.0.1', 'localhost', 'draft-bridge'].includes(url.hostname) || url.protocol !== 'http:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('Use the local Docker draft bridge.');
   return url.origin;
 }
-export async function draftBridgeRequest(method: 'checkAuth' | 'syncArticle', params: unknown, signal?: AbortSignal): Promise<unknown> {
+export async function draftBridgeRequest(method: 'checkAuth' | 'syncArticle' | 'studio.journal' | 'studio.confirmReceipt', params: unknown, signal?: AbortSignal): Promise<unknown> {
   const config = await readDraftBridgeConfig();
   if (!config) throw new Error('Configure the browser draft companion in Accounts first.');
   const timeout = AbortSignal.timeout(method === 'syncArticle' ? 13 * 60_000 : 35_000);
@@ -34,7 +36,7 @@ export async function draftBridgeRequest(method: 'checkAuth' | 'syncArticle', pa
   return z.object({ result: z.unknown() }).parse(await response.json()).result;
 }
 const authSchema = z.object({ isAuthenticated: z.boolean(), userId: z.union([z.string(), z.number()]).transform(String).optional(), username: z.string().max(200).optional(), error: z.string().optional() });
-export type DraftAccountIdentity = { platform: z.infer<typeof nativeDraftPlatformSchema>; isAuthenticated: boolean; userId?: string; username?: string; error?: string; errorCode?: 'timeout' | 'check_failed' };
+export type DraftAccountIdentity = { platform: z.infer<typeof nativeDraftPlatformSchema>; isAuthenticated: boolean; userId?: string; username?: string; error?: string; errorCode?: 'timeout' | 'check_failed' | 'identity_incomplete' };
 function unavailableIdentity(platform: DraftAccountIdentity['platform'], error: unknown): DraftAccountIdentity {
   const message = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
   const timeout = /timeout|timed[\s_-]*out|超时/iu.test(message);
@@ -45,6 +47,7 @@ export async function draftAccountIdentity(platform: Platform): Promise<DraftAcc
   try {
     const result = authSchema.parse(await draftBridgeRequest('checkAuth', { platform: adapterPlatform(selected) }));
     if (result.error?.trim()) return unavailableIdentity(selected, result.error);
+    if (result.isAuthenticated && !result.userId?.trim()) return {platform:selected,isAuthenticated:false,errorCode:'identity_incomplete',error:'平台没有返回可核验的用户 ID。请在指定 Chrome 资料中打开目标账号后台，完成登录后重新核对；当前不能绑定或保存草稿。'};
     const { error: _error, ...identity } = result;
     return { platform: selected, ...identity };
   } catch (error) { return unavailableIdentity(selected, error); }
@@ -52,11 +55,24 @@ export async function draftAccountIdentity(platform: Platform): Promise<DraftAcc
 export async function draftBridgeStatus() {
   const config = await readDraftBridgeConfig();
   let connected = false;
+  let features: string[] = [];
   if (config) try {
     const response = await fetch(`${bridgeBase()}/status`, { headers: { Authorization: `Bearer ${config.serviceKey}` }, redirect: 'error', signal: AbortSignal.timeout(3000) });
-    if (response.ok) connected = z.object({ connected: z.boolean() }).parse(await response.json()).connected;
+    if (response.ok) { const status = z.object({ connected: z.boolean(), features: z.array(z.string()).optional() }).parse(await response.json()); connected = status.connected; features = status.features ?? []; }
   } catch { /* An optional disconnected companion does not block the studio. */ }
-  return { configured: Boolean(config), connected, extensionId: config?.extensionId ?? null, bridgePort: bridgePort() };
+  return { configured: Boolean(config), connected, extensionId: config?.extensionId ?? null, bridgePort: bridgePort(), reconciliationSupported: features.includes('journal-reconciliation') };
+}
+export async function draftJournalStatus() {
+  const bridge = await draftBridgeStatus();
+  if (!bridge.connected || !bridge.reconciliationSupported) throw new Error('请先连接新版 Content Studio 插件，再读取待核对记录。');
+  return draftJournalStatusSchema.parse(await draftBridgeRequest('studio.journal', {}));
+}
+export async function assertDraftJournalReady(): Promise<void> {
+  const bridge = await draftBridgeStatus();
+  // Existing protocol-v1 installations remain readable; new versions advertise the recovery feature.
+  if (!bridge.reconciliationSupported) return;
+  const journal = await draftJournalStatus();
+  if (journal.blocked) throw new DeliveryInputError('插件仍有待核对的草稿记录。请在平台与账号中同步已核对回执；本次没有发送草稿请求。', 'INPUT_INVALID', '打开平台与账号核对插件原记录');
 }
 export async function draftConnectorStatus(selectedPlatform?: z.infer<typeof nativeDraftPlatformSchema>) {
   const platforms = selectedPlatform === undefined ? nativeDraftPlatforms : [nativeDraftPlatformSchema.parse(selectedPlatform)];
@@ -76,6 +92,11 @@ export async function draftBridgeConnectionUrl(): Promise<{ connectionUrl: strin
 export async function configureDraftBridge(value: unknown) {
   const input = draftBridgeConfigSchema.pick({ extensionId: true, extensionToken: true }).parse(value);
   if ((await readState()).jobs.some(job => job.deliveryAction === 'save_draft' && job.status === 'submitting')) throw new Error('Wait for the active draft save before changing the companion.');
+  const previous = await readDraftBridgeConfig();
+  if (previous?.extensionId === input.extensionId) {
+    const a = Buffer.from(previous.extensionToken); const b = Buffer.from(input.extensionToken);
+    if (a.length === b.length && timingSafeEqual(a,b)) return draftBridgeConnectionUrl();
+  }
   await saveDraftBridgeConfig({ ...input, pairingKey: randomBytes(32).toString('base64url'), serviceKey: randomBytes(32).toString('base64url') });
   return draftBridgeConnectionUrl();
 }

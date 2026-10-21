@@ -21,12 +21,36 @@ x-application: &application
     STUDIO_LOCALFS_DIR: /data/media/localfs
     STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://model-runner:8910,http://renderer:8900,http://tts:8880
     STUDIO_MODEL_EXECUTOR_URL: http://model-runner:8910
+  healthcheck:
+    test: [CMD, node, -e, "fetch('http://127.0.0.1:8911/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+    start_period: 20s
   depends_on:
     postgres: {condition: service_healthy}
     rest: {condition: service_started}
     model-runner: {condition: service_healthy}
 
 services:
+  knowledge-tools:
+    profiles: [evidence]
+    image: ${STUDIO_KNOWLEDGE_IMAGE:-content-studio-knowledge:evidence-v1}
+    build: {context: "${STUDIO_PROJECT_DIR:-..}/services/knowledge"}
+    user: "${STUDIO_UID:-1000}:${STUDIO_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,nosuid,size=512m"]
+    mem_limit: 4g
+    cpus: 2
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8920/readyz',timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
   postgres:
     extends: {file: "${STUDIO_DOCKER_ROOT:-../.docker}/config/supabase.compose.json", service: postgres}
     restart: unless-stopped
@@ -71,6 +95,7 @@ services:
       STUDIO_MODEL_EXECUTOR_URL: http://model-runner:8910
       STUDIO_TTS_URL: http://tts:8880
       STUDIO_DRAFT_BRIDGE_URL: http://draft-bridge:8915
+      STUDIO_COMPANION_API_URL: http://api:4310
       STUDIO_DRAFT_BRIDGE_PORT: "${STUDIO_DRAFT_BRIDGE_PORT:-19527}"
       STUDIO_LISTEN_HOST: 0.0.0.0
       PORT: "4310"
@@ -82,7 +107,7 @@ services:
       - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/browser-publisher:/data/browser-publisher"
       - "${STUDIO_DOCKER_ROOT:-../.docker}/browser-staging:/data/browser-staging"
     healthcheck:
-      test: [CMD, node, -e, "fetch('http://127.0.0.1:4310/healthz',{headers:{host:process.env.STUDIO_PUBLIC_ORIGIN.replace('http://','')}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4310/readyz',{headers:{host:new URL(process.env.STUDIO_PUBLIC_ORIGIN).host}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -129,6 +154,7 @@ services:
       STUDIO_LOCALFS_DIR: /data/media/localfs
       STUDIO_INTERNAL_ORIGINS: http://kong:8000,http://draft-bridge:8915
       STUDIO_DRAFT_BRIDGE_URL: http://draft-bridge:8915
+      STUDIO_COMPANION_API_URL: http://api:4310
     volumes:
       - "${STUDIO_DOCKER_ROOT:-../.docker}/data:/data"
       - "${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/youtube:/data/youtube"
@@ -151,6 +177,7 @@ services:
       NODE_ENV: production
       STUDIO_CONTAINER: "true"
       STUDIO_DRAFT_BRIDGE_CONFIG: /data/draft-bridge/config.json
+      STUDIO_COMPANION_API_URL: http://api:4310
     ports: ["127.0.0.1:${STUDIO_DRAFT_BRIDGE_PORT:-19527}:9527"]
     volumes: ["${STUDIO_DOCKER_ROOT:-../.docker}/delivery-private/draft-bridge:/data/draft-bridge:ro"]
     healthcheck:

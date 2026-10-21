@@ -6,10 +6,12 @@ import { hasYouTubeUploadJournal } from './publication-journal.ts';
 import { editorialPolicyPrompt, platformGuidancePrompt } from './content-prompts.ts';
 import { describeEditorialAssessment, runStructuredGeneration, type GenerationOptions } from './generation-engine.ts';
 import { readDraftRevision } from './artifacts.ts';
-import { accountSchema, variantSchema, type Account, type Variant } from './model.ts';
-import { videoApprovalInputSchema, videoCreateInputSchema, videoEditInputSchema, videoGenerationEnvelopeSchema, videoProjectSchema, videoRefinementInputSchema, videoSettingsSchema, type VideoContent, type VideoProject, type VideoRender, type VideoRevision } from './video-model.ts';
+import { accountSchema, variantSchema, type Account, type Variant, type Job } from './model.ts';
+import { videoApprovalInputSchema, videoCreateInputSchema, videoEditInputSchema, videoGenerationEnvelopeSchema, videoProjectSchema, videoRefinementInputSchema, videoSettingsSchema, videoTargetInputSchema, videoTargetEditSchema, type VideoContent, type VideoProject, type VideoRender, type VideoRevision, type VideoSettings, type VideoTarget } from './video-model.ts';
+import { videoDeliverySettingsSchema, type VideoDeliverySettings } from '../contracts/video.ts';
 import { cancelRendererProject, readRendererRevision, renderVideoRevision, type VideoRendererOptions } from './video-renderer.ts';
 import { videoFileHash, videoFingerprint } from './video-tools.ts';
+import { resolveMediaLocation } from './media-location.ts';
 
 export interface VideoRepository {
   get(id: string): Promise<VideoProject>;
@@ -30,7 +32,7 @@ export const supabaseVideoRepository: VideoRepository = {
   },
 };
 export type VideoGenerationOptions = GenerationOptions & { operationId?: string };
-export interface VideoDependencies { operationFence?: { id: string; owner: string }; assertEditable?: (id: string) => Promise<void>; repository?: VideoRepository; generate?: typeof runStructuredGeneration; render?: typeof renderVideoRevision; resolveArticle?: typeof readDraftRevision }
+export interface VideoDependencies { operationFence?: { id: string; owner: string }; assertEditable?: (id: string) => Promise<void>; repository?: VideoRepository; generate?: typeof runStructuredGeneration; render?: typeof renderVideoRevision; resolveArticle?: typeof readDraftRevision; deliveryJobs?: () => Promise<Job[]> }
 function repository(options?: VideoDependencies): VideoRepository { const base = options?.repository ?? supabaseVideoRepository; return options?.operationFence ? { ...base, save: (project, version) => base.save(project, version, options.operationFence) } : base; }
 async function assertVideoEditable(id: string, dependencies: VideoDependencies): Promise<void> {
   if (dependencies.assertEditable) { await dependencies.assertEditable(id); return; }
@@ -44,6 +46,86 @@ export function currentVideoRevision(project: VideoProject): VideoRevision {
   const revision = project.revisions.find(candidate => candidate.number === project.revision); if (!revision) throw new Error('Current video revision is missing.'); return revision;
 }
 export function videoRevisionHash(project: VideoProject): string { return videoFingerprint({ platform: project.brief.platform, brief: project.brief, revision: currentVideoRevision(project) }); }
+// Keep videoRevisionHash and videoDeliveryApprovalHash unchanged: historical receipts use V1.
+export function videoRenderInputHash(project: VideoProject, settings: VideoSettings): string {
+  return videoFingerprint({ contract: 'studio-video-render-v2', projectId: project.id, revision: { ...currentVideoRevision(project), settings }, sources: project.brief.sources });
+}
+export function isCurrentVideoRender(project: VideoProject, render: VideoRender): boolean {
+  return render.revision === project.revision && (render.hashVersion === 2 ? Boolean(render.settings && render.inputHash === videoRenderInputHash(project, render.settings)) : render.inputHash === videoRevisionHash(project));
+}
+export function videoTargets(project: VideoProject): VideoTarget[] {
+  if (project.targets) return project.targets;
+  const content = currentVideoRevision(project).content; const old = project.deliveryApproval;
+  return [{ id: project.id, platform: project.brief.platform, revision: 1, sourceRevision: project.revision,
+    accountId: old?.accountId ?? null, renderId: old?.renderId ?? project.renders.findLast(render => render.status === 'succeeded' && isCurrentVideoRender(project, render))?.id ?? null,
+    title: old?.variant.title ?? content?.title ?? project.brief.topic,
+    text: old?.variant.text ?? (project.brief.instruction || content?.script || project.brief.topic),
+    tags: old?.variant.tags ?? [], deliverySettings: {}, approval: null }];
+}
+function targetJob(job: Job, projectId: string, target: VideoTarget): boolean {
+  if (job.subject?.kind !== 'video' || job.subject.id !== projectId || !job.snapshot?.video) return false;
+  const identity = z.object({ targetId: z.uuid().optional() }).parse(job.snapshot.video);
+  return identity.targetId ? identity.targetId === target.id : target.id === projectId;
+}
+async function assertVideoTargetEditable(projectId: string, target: VideoTarget, dependencies: VideoDependencies): Promise<void> {
+  if (dependencies.assertEditable) { await dependencies.assertEditable(projectId); return; }
+  if (dependencies.repository && !dependencies.deliveryJobs) return;
+  const jobs = dependencies.deliveryJobs ? await dependencies.deliveryJobs() : (await readState()).jobs;
+  for (const job of jobs.filter(item => targetJob(item, projectId, target))) {
+    if (['submitting', 'queued', 'needs_reconciliation'].includes(job.status) || !['published', 'delivered'].includes(job.status) && await hasYouTubeUploadJournal(job)) throw new Error('This video target has an active or unknown delivery. Reconcile that target before editing it.');
+  }
+}
+function validateTargetSelection(project: VideoProject, target: VideoTarget): void {
+  if (target.deliverySettings.youtube && target.platform !== 'youtube') throw new Error('YouTube delivery settings belong only to a YouTube target.');
+  if (target.renderId && !project.renders.some(render => render.id === target.renderId && render.status === 'succeeded' && render.output && isCurrentVideoRender(project, render))) throw new Error('Select a successful render of the current video revision.');
+}
+export async function createVideoTarget(id: string, value: unknown, dependencies: VideoDependencies = {}): Promise<VideoProject> {
+  const input = videoTargetInputSchema.parse(value); const project = await getIndependentVideoProject(id, dependencies); assertRevision(project, input.expectedRevision);
+  const { expectedRevision: _expected, ...fields } = input;
+  const target: VideoTarget = { ...fields, id: randomUUID(), revision: 1, sourceRevision: project.revision, approval: null };
+  validateTargetSelection(project, target);
+  return repository(dependencies).save({ ...project, targets: [...videoTargets(project), target] }, project.version);
+}
+export async function updateVideoTarget(id: string, targetId: string, value: unknown, dependencies: VideoDependencies = {}): Promise<VideoProject> {
+  const input = videoTargetEditSchema.parse(value); const project = await getIndependentVideoProject(id, dependencies); assertRevision(project, input.expectedRevision);
+  const targets = videoTargets(project); const previous = targets.find(item => item.id === z.uuid().parse(targetId));
+  if (!previous) throw new Error('Video target not found.');
+  if (previous.revision !== input.expectedTargetRevision) throw new Error('Video target revision changed; refresh before saving.');
+  await assertVideoTargetEditable(id, previous, dependencies);
+  const { expectedRevision: _videoRevision, expectedTargetRevision: _targetRevision, ...fields } = input;
+  const target: VideoTarget = { ...previous, ...fields, revision: previous.revision + 1, sourceRevision: project.revision, approval: null };
+  validateTargetSelection(project, target);
+  return repository(dependencies).save({ ...project, targets: targets.map(item => item.id === target.id ? target : item), ...(target.id === project.id ? { deliveryApproval: null } : {}) }, project.version);
+}
+export function videoTargetDeliveryHash(input: { projectId: string; revision: VideoRevision; sources: VideoProject['brief']['sources']; targetId: string; targetRevision: number; render: VideoRender; account: Account; variant: Variant; deliverySettings: VideoDeliverySettings }): string {
+  if (!input.render.output) throw new Error('Video render has no output.');
+  const { id, platform, provider, integrationId, physicalIdentity } = input.account;
+  const { title, text, tags } = input.variant;
+  return videoFingerprint({ contract: 'studio-video-delivery-v2', projectId: input.projectId, revision: input.revision, sources: input.sources, targetId: input.targetId, targetRevision: input.targetRevision, renderId: input.render.id, renderInputHash: input.render.inputHash, outputHash: input.render.output.hash,
+    account: { id, platform, provider, integrationId, physicalIdentity: physicalIdentity?.id ?? null }, variant: { platform: input.variant.platform, title, text, tags }, deliverySettings: videoDeliverySettingsSchema.parse(input.deliverySettings) });
+}
+export async function approveVideoTarget(id: string, targetId: string, input: { expectedRevision: number; expectedTargetRevision: number; account: Account }, dependencies: VideoDependencies = {}): Promise<VideoProject> {
+  const project = await getIndependentVideoProject(id, dependencies); assertRevision(project, input.expectedRevision); const targets = videoTargets(project); const target = targets.find(item => item.id === z.uuid().parse(targetId));
+  if (!target || target.revision !== input.expectedTargetRevision || target.sourceRevision !== project.revision) throw new Error('Review the current video target revision before publishing.');
+  await assertVideoTargetEditable(id, target, dependencies);
+  const account = accountSchema.parse(input.account);
+  if (target.accountId !== account.id || target.platform !== account.platform) throw new Error('Video target and selected account do not match.');
+  const render = project.renders.find(item => item.id === target.renderId);
+  if (!render?.output || render.status !== 'succeeded' || !isCurrentVideoRender(project, render)) throw new Error('Review a completed render of the current video revision.');
+  if (await videoFileHash(await resolveMediaLocation(render.output.videoPath)) !== render.output.hash) throw new Error('The reviewed MP4 changed; render it again.');
+  const variant = variantSchema.parse({ platform: target.platform, title: target.title, text: target.text, tags: target.tags, mediaPaths: [render.output.videoPath] });
+  const approval = { hashVersion: 2 as const, targetRevision: target.revision, revision: project.revision, renderId: render.id, renderInputHash: render.inputHash, outputHash: render.output.hash, account, variant, deliverySettings: target.deliverySettings,
+    approvalHash: videoTargetDeliveryHash({ projectId: id, revision: currentVideoRevision(project), sources: project.brief.sources, targetId, targetRevision: target.revision, render, account, variant, deliverySettings: target.deliverySettings }), at: now() };
+  return repository(dependencies).save({ ...project, targets: targets.map(item => item.id === targetId ? { ...item, approval } : item) }, project.version);
+}
+export async function approveVideoRenderVariant(id: string, expectedRevision: number, settings: Partial<VideoSettings>, dependencies: VideoDependencies = {}): Promise<VideoProject> {
+  const project = await getIndependentVideoProject(id, dependencies); assertRevision(project, expectedRevision); const revision = currentVideoRevision(project);
+  if (!revision.content) throw new Error('Review a storyboard before rendering.');
+  validateVideoEvidence(project, revision.content); if (revision.content.scenes.some(scene => !scene.assetId)) throw new Error('Every storyboard scene needs a real reviewed asset.');
+  const effective = videoSettingsSchema.parse({ ...revision.settings, ...settings }); const inputHash = videoRenderInputHash(project, effective);
+  const approval = { revision: project.revision, inputHash, settings: effective, at: now() };
+  return repository(dependencies).save({ ...project, renderApprovals: [...(project.renderApprovals ?? []).filter(item => item.inputHash !== inputHash), approval] }, project.version);
+}
 export function validateVideoEvidence(project: VideoProject, content: VideoContent): void {
   const sources = new Set(project.brief.sources.map(source => source.url));
   for (const scene of content.scenes) if (scene.sourceUrls.some(url => !sources.has(url))) throw new Error('Storyboard cites a source outside the frozen video brief.');
@@ -56,7 +138,7 @@ function assertRevision(project: VideoProject, expectedRevision: number): void {
 function appendRevision(project: VideoProject, content: VideoContent, settings = currentVideoRevision(project).settings, assessment = currentVideoRevision(project).assessment): VideoProject {
   validateVideoEvidence(project, content);
   const previous = currentVideoRevision(project); const revision: VideoRevision = { number: project.revision + 1, createdAt: now(), content, settings, sourceArticle: previous.sourceArticle, assessment };
-  return { ...project, revision: revision.number, revisions: [...project.revisions, revision], status: 'editing', approval: null, deliveryApproval: null };
+  return { ...project, revision: revision.number, revisions: [...project.revisions, revision], status: 'editing', approval: null, deliveryApproval: null, renderApprovals: [], ...(project.targets ? { targets: project.targets.map(target => ({ ...target, approval: null })) } : {}) };
 }
 export async function createVideoProject(input: unknown, dependencies: VideoDependencies = {}): Promise<VideoProject> {
   const parsed = videoCreateInputSchema.parse(input);
@@ -64,9 +146,17 @@ export async function createVideoProject(input: unknown, dependencies: VideoDepe
   if (source && (source.id !== parsed.sourceArticle?.draftId || source.revision !== parsed.sourceArticle.revision)) throw new Error('Source article revision could not be verified.');
   const at = now(); const sourceArticle = source ? { draftId: source.id, revision: source.revision, title: source.title, body: source.body } : null;
   const settings = parsed.settings ?? videoSettingsSchema.parse({ voice: /\p{Script=Han}/u.test(parsed.brief.topic + parsed.brief.instruction) ? 'zf_xiaobei' : 'af_heart' });
-  const project = videoProjectSchema.parse({ id: randomUUID(), version: 1, createdAt: at, updatedAt: at, brief: parsed.brief, revision: 1, revisions: [{ number: 1, createdAt: at, content: parsed.content ?? null, settings, sourceArticle, assessment: null }], proposals: [], renders: [], status: 'editing', approval: null, deliveryApproval: null });
+  const project = videoProjectSchema.parse({ id: parsed.commandId ?? randomUUID(), version: 1, createdAt: at, updatedAt: at, brief: parsed.brief, revision: 1, revisions: [{ number: 1, createdAt: at, content: parsed.content ?? null, settings, sourceArticle, assessment: null }], proposals: [], renders: [], status: 'editing', approval: null, deliveryApproval: null });
   if (parsed.content) validateVideoEvidence(project, parsed.content);
-  return repository(dependencies).save(project, 0);
+  try { return await repository(dependencies).save(project, 0); }
+  catch (error) {
+    if (!parsed.commandId) throw error;
+    const existing = await repository(dependencies).get(project.id).catch(() => null);
+    if (!existing) throw error;
+    const initial = existing.revisions.find(revision => revision.number === 1);
+    if (!initial || videoFingerprint({ brief: existing.brief, content: initial.content, settings: initial.settings, sourceArticle: initial.sourceArticle }) !== videoFingerprint({ brief: parsed.brief, content: parsed.content ?? null, settings, sourceArticle })) throw new Error('Command ID already used for a different video project.');
+    return existing;
+  }
 }
 export async function getIndependentVideoProject(id: string, dependencies: VideoDependencies = {}): Promise<VideoProject> { return repository(dependencies).get(z.uuid().parse(id)); }
 export async function listIndependentVideoProjects(dependencies: VideoDependencies = {}): Promise<VideoProject[]> { return repository(dependencies).list(); }
@@ -137,7 +227,7 @@ export async function approveVideoDelivery(id: string, input: { expectedRevision
   const render = project.renders.find(candidate => candidate.id === z.uuid().parse(input.renderId));
   if (!render?.output || render.status !== 'succeeded' || render.revision !== project.revision || render.inputHash !== videoRevisionHash(project)) throw new Error('Approve a successful render of the current video revision.');
   if (variant.mediaPaths.length !== 1 || variant.mediaPaths[0] !== render.output.videoPath) throw new Error('Video delivery metadata must attach exactly the reviewed final MP4.');
-  if (await videoFileHash(render.output.videoPath) !== render.output.hash) throw new Error('The reviewed MP4 changed; render it again.');
+  if (await videoFileHash(await resolveMediaLocation(render.output.videoPath)) !== render.output.hash) throw new Error('The reviewed MP4 changed; render it again.');
   return repository(dependencies).save({ ...project, deliveryApproval: { renderId: render.id, revision: project.revision, accountId: account.id, outputHash: render.output.hash, approvalHash: videoDeliveryApprovalHash(project, render, account, variant), account, variant, at: now() } }, project.version);
 }
 const activeRenders = new Map<string, AbortController>();
@@ -150,16 +240,23 @@ async function mutateRender(id: string, renderId: string, owner: string, transfo
   }
   throw failure;
 }
-export async function renderVideoProject(id: string, expectedRevision: number, options: Omit<VideoRendererOptions, 'renderId' | 'fence'> = {}, dependencies: VideoDependencies = {}): Promise<VideoProject> {
-  await assertVideoEditable(id, dependencies);
-  let project = await getIndependentVideoProject(id, dependencies); assertRevision(project, expectedRevision); const inputHash = videoRevisionHash(project);
-  if (project.approval?.revision !== expectedRevision || project.approval.inputHash !== inputHash) throw new Error('Approve the current video script, assets and settings before requesting a render.');
-  const previous = project.renders.findLast(render => render.inputHash === inputHash && render.revision === expectedRevision);
-  if (previous?.status === 'succeeded' && previous.output && await videoFileHash(previous.output.videoPath).catch(() => '') === previous.output.hash) return project;
+export async function renderVideoProject(id: string, expectedRevision: number, options: Omit<VideoRendererOptions, 'renderId' | 'fence'> & { settings?: Partial<VideoSettings> } = {}, dependencies: VideoDependencies = {}): Promise<VideoProject> {
+  // Adding an immutable output never changes already approved outputs or platform targets.
+  if (!options.settings) await assertVideoEditable(id, dependencies);
+  let project = await getIndependentVideoProject(id, dependencies); assertRevision(project, expectedRevision);
+  const revision = currentVideoRevision(project); const settings = videoSettingsSchema.parse({ ...revision.settings, ...options.settings });
+  const inputHash = options.settings ? videoRenderInputHash(project, settings) : videoRevisionHash(project);
+  const approved = options.settings ? project.renderApprovals?.some(approval => approval.revision === expectedRevision && approval.inputHash === inputHash) : project.approval?.revision === expectedRevision && project.approval.inputHash === inputHash;
+  if (!approved) throw new Error('Approve the current video script, assets and settings before requesting a render.');
+  let previous = project.renders.findLast(render => render.revision === expectedRevision && (render.inputHash === inputHash || !render.hashVersion && videoFingerprint(settings) === videoFingerprint(revision.settings) && render.inputHash === videoRevisionHash(project)));
+  if (previous?.status === 'succeeded' && previous.output) {
+    if (await resolveMediaLocation(previous.output.videoPath).then(videoFileHash).catch(() => '') === previous.output.hash) return project;
+    previous = undefined; // Never replace a historical successful render when its file needs repair.
+  }
   if (previous?.status === 'running' && Date.now() - Date.parse(previous.heartbeatAt) < 90000) throw new Error('This video render is already active.');
   const renderId = previous?.id ?? randomUUID(); const owner = randomUUID(); const started = now();
-  const render: VideoRender = { ...(dependencies.operationFence ? { operationId: dependencies.operationFence.id } : {}), id: renderId, revision: expectedRevision, inputHash, status: 'running', owner, attempt: (previous?.attempt ?? 0) + 1, phase: 'Preparing reviewed video', startedAt: started, heartbeatAt: started, finishedAt: null, output: null, error: null };
-  project = await repository(dependencies).save({ ...project, status: 'rendering', deliveryApproval: null, renders: [...project.renders.filter(candidate => candidate.id !== renderId), render] }, project.version);
+  const render: VideoRender = { ...(dependencies.operationFence ? { operationId: dependencies.operationFence.id } : {}), ...(options.settings ? { hashVersion: 2, settings } : {}), id: renderId, revision: expectedRevision, inputHash, status: 'running', owner, attempt: (previous?.attempt ?? 0) + 1, phase: 'Preparing reviewed video', startedAt: started, heartbeatAt: started, finishedAt: null, output: null, error: null };
+  project = await repository(dependencies).save({ ...project, status: 'rendering', ...(!options.settings ? { deliveryApproval: null } : {}), renders: [...project.renders.filter(candidate => candidate.id !== renderId), render] }, project.version);
   const controller = new AbortController(); const signal = AbortSignal.any([controller.signal, ...(options.signal ? [options.signal] : [])]); activeRenders.set(renderId, controller);
   let heartbeatFailure: Error | null = null; let heartbeatBusy = false;
   const fence = async (): Promise<void> => {
@@ -173,7 +270,7 @@ export async function renderVideoProject(id: string, expectedRevision: number, o
       .catch(error => { heartbeatFailure = error instanceof Error ? error : new Error('Video heartbeat failed.'); controller.abort(); }).finally(() => { heartbeatBusy = false; });
   }, 5000);
   try {
-    const output = await (dependencies.render ?? renderVideoRevision)(id, currentVideoRevision(project), { ...options, signal, renderId, fence, onProgress: async phase => {
+    const output = await (dependencies.render ?? renderVideoRevision)(id, { ...currentVideoRevision(project), settings }, { ...options, signal, renderId, fence, onProgress: async phase => {
       await mutateRender(id, renderId, owner, (current, attempt) => ({ ...current, renders: current.renders.map(candidate => candidate.id === renderId ? { ...attempt, phase, heartbeatAt: now() } : candidate) }), dependencies); await options.onProgress?.(phase);
     } });
     await fence();

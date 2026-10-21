@@ -31,11 +31,11 @@ test('saved draft receipt displays destination and verification while remaining 
   job.draftReceipt = { destination: 'provider', id: 'provider-draft-id', url: 'https://postiz.example/posts/provider-draft-id', verification: 'adapter_reported' };
   const { html, document } = renderJob(job);
   assert.match(html, /Postiz 审稿草稿/);
-  assert.match(html, /已保存草稿 · 未发布/);
+  assert.match(html, /草稿已保存 · 未发布/);
   assert.match(html, /适配器返回结果，尚需到草稿箱核对/);
   assert.equal(document.querySelector('a[href="https://postiz.example/posts/provider-draft-id"]') !== null, true);
   assert.doesNotMatch(html, /继续保存草稿|核验后记录发布结果|保存效果记录/);
-  assert.equal(statusLabel('draft_saved'), '已保存草稿 · 未发布');
+  assert.equal(statusLabel('draft_saved'), '草稿已保存 · 未发布');
 });
 
 test('only a known unsent draft failure exposes continue and cancel actions', () => {

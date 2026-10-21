@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
-import { chmod, chown, cp, lstat, mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, chown, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -10,6 +10,9 @@ const args = process.argv.slice(2); const action = args[0];
 const flag = name => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
 const root = resolve(flag('--root') ?? process.env.STUDIO_DOCKER_ROOT ?? join(project, '.docker'));
 const config = join(root, 'config');
+export function assertKnowledgeBuildCapacity(availableBytes) {
+  if (!Number.isFinite(availableBytes) || availableBytes < 15 * 1024 ** 3) throw new Error('Knowledge image build requires at least 15 GiB free on the project bind filesystem. Free only verified disposable build artifacts before retrying.');
+}
 async function run(command, argv, { input, output, environment = {}, timeout = 600000, onOutput, onErrorOutput, signal } = {}) {
   if (signal?.aborted) throw new Error('Docker operation canceled.');
   const file = output ? await open(output, 'wx', 0o600) : undefined;
@@ -27,12 +30,58 @@ async function run(command, argv, { input, output, environment = {}, timeout = 6
     child.stdin.end(input);
   });
 }
+export async function readRuntimeOrchestrator(bindRoot) {
+  const path = join(bindRoot, 'config', 'runtime-orchestrator.json');
+  let metadata;
+  try { metadata = await lstat(path); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw new Error('Runtime ownership marker is unreadable or invalid; inspect the private runtime configuration before continuing.');
+  }
+  try {
+    if (!metadata.isFile()) throw new Error('Invalid runtime marker.');
+    const value = JSON.parse(await readFile(path, 'utf8'));
+    if (!value || value.version !== 1 || !['kubernetes', 'compose'].includes(value.orchestrator) || !['active', 'stopped'].includes(value.phase) || !value.images ||
+      !['application', 'model', 'renderer', 'tts'].every(name => typeof value.images[name] === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9._:/@-]{0,511}$/u.test(value.images[name]))) throw new Error('Invalid runtime marker.');
+    return value;
+  } catch (error) {
+    throw new Error('Runtime ownership marker is unreadable or invalid; inspect the private runtime configuration before continuing.');
+  }
+}
+export async function assertComposeAction(bindRoot, command) {
+  const marker = await readRuntimeOrchestrator(bindRoot);
+  if (marker?.orchestrator === 'kubernetes' && (command === 'start' || marker.phase === 'active' && ['backup', 'stop', 'migrate'].includes(command))) {
+    throw new Error('Kubernetes owns this runtime. Use its lifecycle wrapper to stop, back up, migrate or explicitly roll back before starting Compose.');
+  }
+}
+async function writeRuntimeOrchestrator(bindRoot, marker) {
+  const path = join(bindRoot, 'config', 'runtime-orchestrator.json'); const temporary = `${path}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, 'wx', 0o600);
+  try {
+    try { await handle.writeFile(`${JSON.stringify({ ...marker, updatedAt: new Date().toISOString() }, null, 2)}\n`); await handle.sync(); }
+    finally { await handle.close(); }
+    await rename(temporary, path);
+  } finally { await rm(temporary, { force: true }); }
+}
+export async function restoreRuntimeOrchestrator(bindRoot) {
+  const marker = await readRuntimeOrchestrator(bindRoot);
+  if (marker) await writeRuntimeOrchestrator(bindRoot, { ...marker, orchestrator: 'compose', phase: 'stopped' });
+}
+async function markComposePhase(phase) {
+  const marker = await readRuntimeOrchestrator(root);
+  if (marker?.orchestrator === 'compose') await writeRuntimeOrchestrator(root, { ...marker, phase });
+}
 async function settings() {
   const text = await readFile(join(config, 'compose.env'), 'utf8');
-  return Object.fromEntries(text.trim().split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), JSON.parse(line.slice(i + 1))]; }));
+  const values = Object.fromEntries(text.trim().split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), JSON.parse(line.slice(i + 1))]; }));
+  const marker = await readRuntimeOrchestrator(root);
+  if (marker) Object.assign(values, { STUDIO_APPLICATION_IMAGE: marker.images.application, STUDIO_MODEL_IMAGE: marker.images.model, STUDIO_RENDERER_IMAGE: marker.images.renderer, ...(marker.images.knowledge ? { STUDIO_KNOWLEDGE_IMAGE: marker.images.knowledge } : {}), STUDIO_TTS_IMAGE: marker.images.tts });
+  return values;
 }
 async function compose(argv, options = {}) {
-  return run('docker', ['compose', '--project-directory', project, '--env-file', join(config, 'compose.env'), '-f', join(project, 'infra', 'compose.yml'), ...argv], { ...options, environment: { ...await settings(), STUDIO_DOCKER_ROOT: root, STUDIO_PROJECT_DIR:project, ...options.environment } });
+  const environment = { ...await settings(), STUDIO_DOCKER_ROOT: root, STUDIO_PROJECT_DIR:project, ...options.environment };
+  const profiles = environment.STUDIO_KNOWLEDGE_IMAGE ? ['--profile', 'evidence'] : [];
+  return run('docker', ['compose', '--project-directory', project, '--env-file', join(config, 'compose.env'), '-f', join(project, 'infra', 'compose.yml'), ...profiles, ...argv], { ...options, environment });
 }
 export function modelLoginMethod(argv) {
   if (argv.some(value => value.startsWith('--method='))) throw new Error('Use --method device or --method browser.');
@@ -229,6 +278,8 @@ async function quiesceRestore() {
     update public.studio_video_projects p set content=jsonb_set(jsonb_set(p.content,'{renders}',coalesce((select jsonb_agg(case when render->>'status'='running' then render || jsonb_build_object('status','failed','phase','Restore interrupted render; explicit retry required','error','Restore interrupted rendering; cached stages and checkpoints are preserved.','finishedAt',to_char(now() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'heartbeatAt',to_char(now() at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) else render end order by position) from jsonb_array_elements(p.content->'renders') with ordinality entries(render,position)),'[]'::jsonb)),'{status}',to_jsonb(case when exists(select 1 from jsonb_array_elements(p.content->'renders') render where render->>'status'='succeeded' and render->>'revision'=p.content->>'revision') then 'ready'::text else 'editing'::text end)),updated_at=now() where p.content->>'status'='rendering' or exists(select 1 from jsonb_array_elements(p.content->'renders') render where render->>'status'='running');
     update public.content_studio_workspaces w set state=jsonb_set(w.state,'{jobs}',coalesce((select jsonb_agg(case when job->>'status'='submitting' then (job-'submissionOwner') || jsonb_build_object('submissionOwner',null,'status','needs_reconciliation','error','Restored upload ownership requires reconciliation; historical snapshot and journal are preserved.') else job end order by position) from jsonb_array_elements(w.state->'jobs') with ordinality entries(job,position)),'[]'::jsonb)),revision=revision+1,updated_at=now() where exists(select 1 from jsonb_array_elements(w.state->'jobs') job where job->>'status'='submitting');
     do $$begin
+      if to_regclass('public.studio_source_collections') is not null then execute 'update public.studio_source_collections set status=''failed'',error=''RESTORE_INTERRUPTED'',finished_at=now() where status=''queued''';end if;
+      if to_regclass('public.studio_source_registry') is not null then execute 'update public.studio_source_registry set next_poll_at=null';end if;
       if to_regclass('public.studio_account_execution_leases') is not null then execute 'update public.studio_account_execution_leases set owner_token=null,expires_at=now()';end if;
       if to_regclass('public.studio_metric_polls') is not null then execute 'update public.studio_metric_polls set enabled=false,blocked_reason=''RESTORED_PAUSED''';end if;
       if to_regclass('public.studio_metric_attempts') is not null then execute 'update public.studio_metric_attempts set status=''failed'',error=''RESTORE_INTERRUPTED'',finished_at=now() where status=''queued''';end if;
@@ -261,6 +312,17 @@ async function hashes(directory, prefix = '') {
     else if (entry.isFile()) { const handle = await open(path, 'r'); const hash = createHash('sha256'); let size = 0; try { for await (const chunk of handle.createReadStream()) { hash.update(chunk); size += chunk.length; } } finally { await handle.close(); } files.push({ key, size, sha256: hash.digest('hex') }); }
   }
   return files.sort((a, b) => a.key.localeCompare(b.key));
+}
+/** Shared format-3 integrity check; callers never need to print or decrypt private payloads. */
+export async function verifyPortableBackup(folder) {
+  const manifest = JSON.parse(await readFile(join(folder, 'manifest.json'), 'utf8'));
+  if (manifest.format !== 3 || manifest.encryption !== 'aes-256-gcm' || manifest.paused !== true) throw new Error('Unsupported or unpaused portable backup.');
+  const actual = (await hashes(folder)).filter(file => file.key !== 'manifest.json');
+  if (JSON.stringify(actual) !== JSON.stringify(manifest.inventory)) throw new Error('Portable backup hashes differ.');
+  for (const key of ['database.dump.enc', 'roles.sql.enc', 'pgmq-studio.json.enc', 'config/application.env.enc', 'config/compose.env.enc', 'config/supabase.compose.json.enc']) {
+    if (!actual.some(file => file.key === key && file.size > 28)) throw new Error('Portable backup is missing required encrypted state.');
+  }
+  return { verifiedFiles: actual.length };
 }
 async function encryptionKey(create = false) {
   const path = resolve(flag('--key-file') ?? join(root, 'backup.key'));
@@ -308,6 +370,7 @@ async function backup() {
   await sql("select jsonb_build_object('queue',coalesce((select jsonb_agg(to_jsonb(q)) from pgmq.q_studio_jobs q),'[]'::jsonb),'archive',coalesce((select jsonb_agg(to_jsonb(a)) from pgmq.a_studio_jobs a),'[]'::jsonb));",join(destination,'pgmq-studio.json'));
   await compose(['exec', '-T', 'postgres', 'pg_dumpall', '-U', 'postgres', '--globals-only'], { output: join(destination, 'roles.sql') });
   await compose(['stop']);
+  await markComposePhase('stopped');
   await copyBackupTrees(root,destination);
   const {inventory,journalIds}=await protectBackup(destination); await privateFile(join(destination, 'manifest.json'), JSON.stringify({format:3, encryption:'aes-256-gcm', inventory, journalIds, paused:true, createdAt:new Date().toISOString()},null,2));
   console.log(JSON.stringify({ backup: destination, portableLogicalDatabaseDump: true, rawPGDATAExcluded: true, verifiedFiles: inventory.length, servicesStopped: true, containsPrivateState: true }));
@@ -331,6 +394,8 @@ async function restore() {
     if(file.key.endsWith('.enc')) await decryptFile(join(folder,file.key),destination,key,name);
     else { await mkdir(dirname(destination),{recursive:true,mode:0o700}); await cp(join(folder,file.key),destination,{errorOnExist:true,force:false}); }
   }
+  // A restored bind root is an isolated Compose instance, retaining its exact release bundle.
+  await restoreRuntimeOrchestrator(root);
   for (const name of ['postgres','model-auth','model-cache','delivery-private/youtube/uploads','delivery-private/google','delivery-private/draft-bridge','tts-cache']) await mkdir(join(root,name),{recursive:true,mode:0o700});
   if(!args.includes('--restore-private')) for(const id of manifest.journalIds??[]) {
     if(!/^[a-f0-9-]{36}$/.test(id)) throw new Error('Invalid protected upload journal ID.');
@@ -369,6 +434,7 @@ async function restore() {
   console.log(JSON.stringify({ restored: true, root, filesVerified: actual.length, servicesStarted: false, publishingPaused: true, privateStateRestored:args.includes('--restore-private') }));
 }
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) try {
+  await assertComposeAction(root, action);
   if (action === 'protect-backup') { const destination=resolve(flag('--source')); const old=JSON.parse(await readFile(join(destination,'manifest.json'),'utf8')); const {inventory,journalIds}=await protectBackup(destination); await writeFile(join(destination,'manifest.json'),JSON.stringify({...old,format:3,encryption:'aes-256-gcm',inventory,journalIds},null,2),{mode:0o600}); console.log('Private backup files encrypted; key retained outside backup.'); }
   else if (action === 'capture') await capture();
   else if (action === 'youtube-auth') await authorizeYouTube();
@@ -382,6 +448,14 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   }
   else if (action === 'model-login') {
     await authorizeModel();
+  }
+  else if (action === 'knowledge-build') {
+    const capacity = await statfs(project); assertKnowledgeBuildCapacity(capacity.bavail * capacity.bsize);
+    const image = flag('--image');
+    if (!image || !/^[a-zA-Z0-9][a-zA-Z0-9/_.:@-]{1,240}$/u.test(image) || image.endsWith(':latest')) throw new Error('Provide a pinned knowledge --image tag or digest.');
+    const buildArgs = ['STUDIO_PYPI_MIRROR', 'STUDIO_APT_ORIGIN'].flatMap(key => process.env[key] ? ['--build-arg', `${key}=${process.env[key]}`] : []);
+    await run('docker', ['build', ...buildArgs, '--tag', image, join(project, 'services', 'knowledge')], { timeout: 1800000, onErrorOutput: chunk => process.stderr.write(chunk) });
+    console.log('Pinned CPU knowledge image built; runtime models verified against models.lock.json.');
   }
   else if (action === 'build') {
     await compose(['build'], { timeout: 1800000 });
@@ -404,10 +478,10 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
   else if (action === 'browser-start') {await compose(['--profile','browser-publisher','build','browser-publisher'],{timeout:1800000});await compose(['--profile','browser-publisher','up','-d','--wait','browser','browser-publisher'],{timeout:600000});console.log('Optional browser services started.');}
   else if (action === 'database') { await compose(['up', '-d', '--wait', 'postgres', 'rest', 'auth', 'storage', 'mail', 'kong']); await pause(); console.log('Supabase Docker services started with publishing and scheduling paused.'); }
   else if (action === 'migrate') await migrate();
-  else if (action === 'start') { const env = await settings(); await prepareDraftBridgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await prepareKnowledgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await compose(['up', '-d', '--wait']); console.log('All Docker services started.'); }
-  else if (action === 'stop') { await compose(['stop']); console.log('Docker services stopped; bind data retained.'); }
+  else if (action === 'start') { const env = await settings(); await prepareDraftBridgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await prepareKnowledgeDirectory(root, Number(env.STUDIO_UID), Number(env.STUDIO_GID)); await compose(['up', '-d', '--wait']); await markComposePhase('active'); console.log('All Docker services started.'); }
+  else if (action === 'stop') { await compose(['stop']); await markComposePhase('stopped'); console.log('Docker services stopped; bind data retained.'); }
   else if (action === 'status') console.log(await compose(['ps', '--format', 'json']));
   else if (action === 'backup') await backup();
   else if (action === 'restore') await restore();
-  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|database|migrate|start|stop|status|backup|restore|model-login|knowledge-config|youtube-auth|browser-config|browser-start|browser-smoke [--root folder] [model-login --method device|browser]');
+  else throw new Error('Usage: node scripts/docker.mjs capture|config|build|knowledge-build|database|migrate|start|stop|status|backup|restore|model-login|knowledge-config|youtube-auth|browser-config|browser-start|browser-smoke [--root folder] [knowledge-build --image pinned-tag] [model-login --method device|browser]');
 } catch (error) { console.error(error instanceof Error ? error.message : 'Docker operation failed.'); process.exitCode = 1; }

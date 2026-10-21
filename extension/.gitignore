@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.recovery/
+*.zip
+.env*
+!.env.example
+public/inject-api.js
+artifacts/

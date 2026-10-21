@@ -3,17 +3,19 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { pathToFileURL } from 'node:url';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { z } from 'zod';
+import { draftExecutorHelloSchema, draftExecutorPlatforms, draftExecutorSaveSchema, draftJournalConfirmationSchema } from '../contracts/draft-executor.ts';
 import { readDraftBridgeConfig, type DraftBridgeConfig } from '../core/draft-bridge-config.ts';
+import { createCompanionChannel } from './companion-channel.ts';
+import { studioPairingKey } from './studio-pairing.ts';
 
 // These three reviewed upstream adapters only create drafts. No platform API is implemented here.
-export const draftBridgePlatforms = ['weixin', 'zhihu', 'bilibili'] as const;
+export const draftBridgePlatforms = draftExecutorPlatforms;
 const platformSchema = z.enum(draftBridgePlatforms);
-const articleSchema = z.object({ title: z.string().trim().min(1).max(300), content: z.string().max(16 * 1024 * 1024).optional(), markdown: z.string().max(16 * 1024 * 1024).optional(), cover: z.string().max(8 * 1024 * 1024).optional() }).strict().refine(value => Boolean(value.content || value.markdown));
 const requestSchema = z.discriminatedUnion('method', [
-  z.object({ method: z.literal('listPlatforms'), params: z.object({ forceRefresh: z.boolean().optional() }).strict().optional() }).strict(),
   z.object({ method: z.literal('checkAuth'), params: z.object({ platform: platformSchema }).strict() }).strict(),
-  z.object({ method: z.literal('uploadImage'), params: z.object({ platform: platformSchema, mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']), imageData: z.string().min(4).max(14 * 1024 * 1024).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/) }).strict() }).strict(),
-  z.object({ method: z.literal('syncArticle'), params: z.object({ platforms: z.tuple([platformSchema]), article: articleSchema }).strict() }).strict(),
+  z.object({ method: z.literal('syncArticle'), params: draftExecutorSaveSchema }).strict(),
+  z.object({ method: z.literal('studio.journal'), params: z.object({}).strict() }).strict(),
+  z.object({ method: z.literal('studio.confirmReceipt'), params: draftJournalConfirmationSchema }).strict(),
 ]);
 type BridgeRequest = z.infer<typeof requestSchema>;
 type ErrorCode = 'NOT_CONFIGURED' | 'UNAUTHORIZED' | 'INVALID_REQUEST' | 'NOT_CONNECTED' | 'BUSY' | 'UNKNOWN_OUTCOME' | 'EXTENSION_REJECTED' | 'EXTENSION_RESPONSE_INVALID' | 'UNAVAILABLE';
@@ -24,10 +26,10 @@ const maxBodyBytes = 24 * 1024 * 1024;
 const messages: Record<ErrorCode, string> = {
   NOT_CONFIGURED: 'Configure the browser companion before connecting.', UNAUTHORIZED: 'Draft bridge authorization failed.', INVALID_REQUEST: 'The bridge request is invalid.', NOT_CONNECTED: 'The configured browser companion is not connected.', BUSY: 'A browser companion request is already running.', UNKNOWN_OUTCOME: 'The companion response was interrupted or timed out. Inspect the existing draft before retrying.', EXTENSION_REJECTED: 'The browser companion rejected the request. Verify its token and account login.', EXTENSION_RESPONSE_INVALID: 'The companion returned an invalid response. Inspect the existing draft before retrying.', UNAVAILABLE: 'The draft bridge is unavailable.',
 };
-type Session = { socket: WebSocket; configFingerprint: string; id: string; authenticated: boolean; heartbeatTimer: ReturnType<typeof setInterval> | null; heartbeatProbe: { id: string; timer: ReturnType<typeof setTimeout> } | null; heartbeatChecking: boolean };
+type Session = { socket: WebSocket; configFingerprint: string; id: string; authenticated: boolean; features: string[]; heartbeatTimer: ReturnType<typeof setInterval> | null; heartbeatProbe: { id: string; timer: ReturnType<typeof setTimeout> } | null; heartbeatChecking: boolean };
 type Pending = { sessionId: string; method: BridgeRequest['method']; resolve: (value: unknown) => void; reject: (error: BridgeError) => void; timer: ReturnType<typeof setTimeout> };
 export type DraftBridgeOptions = { configPath?: string; host?: string; wsPort?: number; httpPort?: number; readTimeoutMs?: number; writeTimeoutMs?: number; heartbeatIntervalMs?: number; heartbeatTimeoutMs?: number };
-const heartbeatResultSchema = z.object({ isAuthenticated: z.literal(true), username: z.literal('本地下载') }).strict();
+const heartbeatResultSchema = draftExecutorHelloSchema;
 
 function equalSecret(left: string, right: string): boolean {
   const a = Buffer.from(left); const b = Buffer.from(right);
@@ -70,8 +72,8 @@ export function createDraftBridge(options: DraftBridgeOptions = {}): { start: ()
     if (session && session.configFingerprint !== fingerprint(config)) disconnect(session);
     return config;
   };
-  // Reviewed upstream a98e428: ZipDownloadAdapter.checkAuth only returns a local constant.
-  // This internal control call never enters the public platform allowlist or business queue.
+  // Authenticate the restored executor and its draft-only protocol without touching any platform.
+  // Official upstream MCP alone is insufficient: it cannot enforce Studio job/account fences.
   const heartbeat = async (active: Session): Promise<void> => {
     if (closing || session?.id !== active.id || active.socket.readyState !== WebSocket.OPEN || active.heartbeatProbe || active.heartbeatChecking) return;
     active.heartbeatChecking = true;
@@ -81,7 +83,7 @@ export function createDraftBridge(options: DraftBridgeOptions = {}): { start: ()
       const id = randomUUID();
       const timer = setTimeout(() => { if (active.heartbeatProbe?.id === id) disconnect(active); }, options.heartbeatTimeoutMs ?? 8000);
       timer.unref(); active.heartbeatProbe = { id, timer };
-      active.socket.send(JSON.stringify({ id, method: 'checkAuth', token: config.extensionToken, params: { platform: 'zip-download' } }), error => { if (error && active.heartbeatProbe?.id === id) disconnect(active); });
+      active.socket.send(JSON.stringify({ id, method: 'studio.hello', token: config.extensionToken, params: {} }), error => { if (error && active.heartbeatProbe?.id === id) disconnect(active); });
     } catch { if (session?.id === active.id) disconnect(active); }
     finally { active.heartbeatChecking = false; }
   };
@@ -90,7 +92,7 @@ export function createDraftBridge(options: DraftBridgeOptions = {}): { start: ()
     if (!active || !active.authenticated || active.socket.readyState !== WebSocket.OPEN) throw new BridgeError('NOT_CONNECTED', 503);
     if (pending.size) throw new BridgeError('BUSY', 409);
     const id = randomUUID();
-    const write = request.method === 'syncArticle' || request.method === 'uploadImage';
+    const write = request.method === 'syncArticle';
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); reject(new BridgeError(write ? 'UNKNOWN_OUTCOME' : 'UNAVAILABLE', 504)); }, write ? options.writeTimeoutMs ?? 12 * 60_000 : options.readTimeoutMs ?? 30_000);
       pending.set(id, { sessionId: active.id, method: request.method, resolve, reject, timer });
@@ -104,7 +106,7 @@ export function createDraftBridge(options: DraftBridgeOptions = {}): { start: ()
       if (request.method === 'GET' && request.url === '/healthz') { json(response, 200, { ok: true }); return; }
       const config = await currentConfig();
       if (!equalSecret(request.headers.authorization ?? '', `Bearer ${config.serviceKey}`)) throw new BridgeError('UNAUTHORIZED', 401);
-      if (request.method === 'GET' && request.url === '/status') { json(response, 200, { configured: true, connected: session?.authenticated === true && session.socket.readyState === WebSocket.OPEN }); return; }
+      if (request.method === 'GET' && request.url === '/status') { json(response, 200, { configured: true, connected: session?.authenticated === true && session.socket.readyState === WebSocket.OPEN, features: session?.features ?? [] }); return; }
       if (request.method !== 'POST' || request.url !== '/request' || request.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') throw new BridgeError('INVALID_REQUEST', 400);
       const parsed = requestSchema.safeParse(await body(request));
       if (!parsed.success) throw new BridgeError('INVALID_REQUEST', 400);
@@ -116,9 +118,11 @@ export function createDraftBridge(options: DraftBridgeOptions = {}): { start: ()
   });
   httpServer.requestTimeout = 15_000;
   const wsServer = createServer((_request, response) => { response.writeHead(404); response.end(); });
+  const companion = createCompanionChannel(currentConfig);
   const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024, perMessageDeflate: false });
   wsServer.on('upgrade', (request, socket, head) => {
     socket.on('error', () => socket.destroy());
+    if (request.url?.split('?')[0] === '/ui/connect') { companion.upgrade(request,socket,head); return; }
     const reject = (status: number) => { socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\n\r\n`); };
     if (closing) { reject(503); return; }
     if (upgrading) { reject(409); return; }
@@ -127,11 +131,11 @@ export function createDraftBridge(options: DraftBridgeOptions = {}): { start: ()
       const config = await currentConfig();
       if (closing) { reject(503); return; }
       const url = new URL(request.url ?? '', 'http://bridge.invalid');
-      if (request.headers.origin !== `chrome-extension://${config.extensionId}` || url.pathname !== '/connect' || url.searchParams.size !== 1 || !equalSecret(url.searchParams.get('key') ?? '', config.pairingKey)) { reject(403); return; }
+      if (request.headers.origin !== `chrome-extension://${config.extensionId}` || url.pathname !== '/connect' || !equalSecret(studioPairingKey(url,request.headers['sec-websocket-protocol']) ?? '', config.pairingKey)) { reject(403); return; }
       if (session && session.socket.readyState !== WebSocket.CLOSED) { reject(409); return; }
       wss.handleUpgrade(request, socket, head, client => {
         if (closing) { client.terminate(); return; }
-        const active: Session = { socket: client, id: randomUUID(), configFingerprint: fingerprint(config), authenticated: false, heartbeatTimer: null, heartbeatProbe: null, heartbeatChecking: false }; session = active;
+        const active: Session = { socket: client, id: randomUUID(), configFingerprint: fingerprint(config), authenticated: false, features: [], heartbeatTimer: null, heartbeatProbe: null, heartbeatChecking: false }; session = active;
         client.on('close', () => clearSession(active));
         client.on('error', () => { clearSession(active); client.terminate(); });
         client.on('message', (bytes: RawData, isBinary: boolean) => {
@@ -146,8 +150,10 @@ export function createDraftBridge(options: DraftBridgeOptions = {}): { start: ()
           const parsed = response.data;
           if (active.heartbeatProbe?.id === parsed.id) {
             clearTimeout(active.heartbeatProbe.timer); active.heartbeatProbe = null;
-            if (parsed.error || !heartbeatResultSchema.safeParse(parsed.result).success) { disconnect(active); return; }
+            const hello = heartbeatResultSchema.safeParse(parsed.result);
+            if (parsed.error || !hello.success) { disconnect(active); return; }
             active.authenticated = true;
+            active.features = hello.data.features ?? [];
             if (!active.heartbeatTimer && !closing && session?.id === active.id) {
               active.heartbeatTimer = setInterval(() => { void heartbeat(active); }, options.heartbeatIntervalMs ?? 20_000);
               active.heartbeatTimer.unref();
@@ -167,7 +173,7 @@ export function createDraftBridge(options: DraftBridgeOptions = {}): { start: ()
   });
   return {
     async start() { const host = options.host ?? '0.0.0.0'; const wsPort = await listen(wsServer, options.wsPort ?? 9527, host); try { return { wsPort, httpPort: await listen(httpServer, options.httpPort ?? 8915, host) }; } catch (error) { await stop(wsServer); throw error; } },
-    async close() { closing = true; if (session) disconnect(session); for (const client of wss.clients) client.terminate(); await Promise.all([stop(httpServer), stop(wsServer)]); wss.close(); },
+    async close() { closing = true; companion.close(); if (session) disconnect(session); for (const client of wss.clients) client.terminate(); await Promise.all([stop(httpServer), stop(wsServer)]); wss.close(); },
   };
 }
 

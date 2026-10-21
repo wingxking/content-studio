@@ -10,6 +10,7 @@ import { editorialPolicyPrompt } from './content-prompts.ts';
 import { runStructuredGeneration, type GenerationOptions } from './generation-engine.ts';
 import { sourceSchema, type Source } from './model.ts';
 import { assessmentSchema, type Task } from './task-model.ts';
+import { hasSourceCredentials } from '../contracts/research.ts';
 
 export type ResearchResult = { sources: Source[]; warnings: string[] };
 export function isPublicAddress(address: string): boolean {
@@ -23,7 +24,7 @@ export function isPublicAddress(address: string): boolean {
 }
 export function validateSourceUrl(input: string): URL {
   const url = new URL(input); const host = url.hostname.replace(/^\[|\]$/gu, '').toLowerCase();
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || (url.port && url.port !== (url.protocol === 'https:' ? '443' : '80'))) throw new Error('Use a public HTTP(S) source without credentials or custom ports.');
+  if (!['http:', 'https:'].includes(url.protocol) || hasSourceCredentials(url) || (url.port && url.port !== (url.protocol === 'https:' ? '443' : '80'))) throw new Error('Use a public HTTP(S) source without credentials or custom ports.');
   if (host === 'localhost' || /\.(?:localhost|local|internal|lan|home)$/u.test(host) || (isIP(host) && !isPublicAddress(host))) throw new Error('Private and local source addresses are not allowed.');
   url.hash = ''; return url;
 }
@@ -61,8 +62,8 @@ async function publicAddress(url: URL, signal?: AbortSignal): Promise<{ address:
   const first = addresses.find(entry => entry.family === 4) ?? addresses[0]; if (!first) throw new Error('Source DNS had no address.');
   return first;
 }
-type PageReply = { status: number; location: string | null; mime: string; body: string };
-async function requestPage(url: URL, signal?: AbortSignal): Promise<PageReply> {
+export type PageReply = { status: number; location: string | null; mime: string; body: string; bytes: Buffer };
+async function requestPage(url: URL, signal?: AbortSignal, maximumBytes = 2 * 1024 * 1024): Promise<PageReply> {
   signal?.throwIfAborted(); const address = await publicAddress(url, signal); signal?.throwIfAborted();
   const host = url.hostname.replace(/^\[|\]$/gu, '');
   return new Promise<PageReply>((resolvePage, reject) => {
@@ -73,11 +74,16 @@ async function requestPage(url: URL, signal?: AbortSignal): Promise<PageReply> {
     }, response => {
       const chunks: Buffer[] = []; let bytes = 0;
       const length = response.headers['content-length'];
-      if (length && Number(length) > 2 * 1024 * 1024) { request.destroy(new Error('Source exceeds the 2 MiB limit.')); return; }
+      if (length && Number(length) > maximumBytes) { request.destroy(new Error('Source exceeds its byte limit.')); return; }
       if (response.headers['content-encoding'] && response.headers['content-encoding'] !== 'identity') { request.destroy(new Error('Source used unsupported compression.')); return; }
-      response.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 2 * 1024 * 1024) request.destroy(new Error('Source exceeds the 2 MiB limit.')); else chunks.push(chunk); });
+      response.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > maximumBytes) request.destroy(new Error('Source exceeds its byte limit.')); else chunks.push(chunk); });
       response.once('error', reject);
-      response.once('end', () => { clearTimeout(timer); resolvePage({ status: response.statusCode ?? 0, location: response.headers.location ?? null, mime: (response.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase() ?? '', body: Buffer.concat(chunks).toString('utf8') }); });
+      response.once('end', () => {
+        clearTimeout(timer); const content = Buffer.concat(chunks); const type = response.headers['content-type'] ?? '';
+        const charset = /charset=["']?([a-z0-9_-]+)/iu.exec(type)?.[1] ?? 'utf-8';
+        let body: string; try { body = type.startsWith('application/pdf') ? '' : new TextDecoder(charset).decode(content); } catch { reject(new Error('Unsupported source text encoding.')); return; }
+        resolvePage({ status: response.statusCode ?? 0, location: response.headers.location ?? null, mime: type.split(';')[0]?.trim().toLowerCase() ?? '', body, bytes: content });
+      });
     });
     const timer = setTimeout(() => request.destroy(new Error('Source request timed out.')), 15000);
     request.once('error', () => { clearTimeout(timer); reject(new Error('Source request failed or timed out.')); });
@@ -104,15 +110,21 @@ export function extractSourceText(body: string, mime: string, url: string): Sour
   return sourceSchema.parse({ title: title.slice(0, 300), url, excerpt: text.slice(0, 12000) });
 }
 export async function fetchSource(input: string, signal?: AbortSignal): Promise<Source> {
+  const page = await fetchPublicPage(input, signal);
+  return extractSourceText(page.body, page.mime, page.url);
+}
+export async function fetchPublicPage(input: string, signal?: AbortSignal, maximumBytes = 2 * 1024 * 1024): Promise<PageReply & { url: string }> {
+  if (maximumBytes > 50 * 1024 * 1024 || maximumBytes < 1) throw new Error('Invalid source byte limit.');
   let url = validateSourceUrl(input);
   for (let redirects = 0; redirects <= 3; redirects++) {
-    const reply = await requestPage(url, signal);
+    if (/(^|\.)(?:reddit\.com|redd\.it)$/u.test(url.hostname)) throw new Error('Reddit automated access requires an approved App; retain the discovery link only.');
+    const reply = await requestPage(url, signal, maximumBytes);
     if (reply.status >= 300 && reply.status < 400) {
       if (!reply.location || redirects === 3) throw new Error('Source redirect limit exceeded.');
       url = validateSourceUrl(new URL(reply.location, url).href); continue;
     }
     if (reply.status < 200 || reply.status >= 300) throw new Error(`Source returned HTTP ${reply.status}; access was not bypassed.`);
-    return extractSourceText(reply.body, reply.mime, url.href);
+    return { ...reply, url: url.href };
   }
   throw new Error('Source redirect limit exceeded.');
 }

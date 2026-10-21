@@ -7,6 +7,8 @@ import { createOperation, createVideoOperation, listOperations, listVideoOperati
 import { reconcileYouTubeJob, uploadYouTubeJob, youtubeSettingsSchema, expectedYouTubeChannelId } from './youtube.ts';
 import { platformIds, type Job, type Account, type Draft } from './model.ts';
 import { hasYouTubeUploadJournal } from './publication-journal.ts';
+import { approvedVideoUploadSettings } from './video-delivery.ts';
+import { articleMediaReference } from './article-media.ts';
 
 function automaticFor(account: Account, draft: Draft): boolean {
   if (account.status !== 'connected') return false;
@@ -16,7 +18,7 @@ function automaticFor(account: Account, draft: Draft): boolean {
   return true;
 }
 export const publishInputSchema = z.object({ accountIds: z.array(z.uuid()).min(1).max(platformIds.length), expectedRevision: z.number().int().positive(), youtubeSettings: youtubeSettingsSchema.optional() });
-export async function publishDraft(id: string, value: z.infer<typeof publishInputSchema>): Promise<Job[]> {
+export async function publishDraft(id: string, value: z.infer<typeof publishInputSchema>, options: { queue?: boolean; jobId?: string; scheduledAt?: string } = {}): Promise<Job[]> {
   const input = publishInputSchema.parse(value); const state = await readState();
   const draft = state.drafts.find(item => item.id === id);
   if (draft?.adaptationStatus === 'pending') throw new Error('The master is still waiting for platform adaptation. Finish or retry synchronization, then review the resulting platform versions before publishing.');
@@ -27,8 +29,8 @@ export async function publishDraft(id: string, value: z.infer<typeof publishInpu
   await approveDraft(id, input.expectedRevision); const jobs: Job[] = [];
   for (const account of accounts) {
     const automatic = automaticFor(account, draft) && (account.platform !== 'youtube' || account.provider !== 'native' || input.youtubeSettings !== undefined);
-    const job = await preparePublication({ draftId: id, accountId: account.id, expectedRevision: input.expectedRevision, automatic }); jobs.push(job);
-    if (automatic && ['scheduled', 'awaiting_operator'].includes(job.status)) {
+    const job = await preparePublication({ draftId: id, accountId: account.id, expectedRevision: input.expectedRevision, automatic, ...(options.scheduledAt ? { scheduledAt: options.scheduledAt } : {}), ...(options.jobId ? { jobId: options.jobId } : {}) }); jobs.push(job);
+    if (options.queue !== false && (!options.scheduledAt || Date.parse(options.scheduledAt) <= Date.now()) && automatic && ['scheduled', 'awaiting_operator'].includes(job.status)) {
       const pending = (await listOperations(id)).some(operation => operation.kind === 'publish' && operation.input.jobId === job.id && ['queued', 'running'].includes(operation.status));
       if (!pending) await createOperation(id, 'publish', { jobId: job.id, ...(input.youtubeSettings ? { youtubeSettings: input.youtubeSettings } : {}) });
     }
@@ -54,7 +56,7 @@ async function executePublication(id: string, settings: unknown, signal?: AbortS
     if (await hasYouTubeUploadJournal(job)) return reconcileSavedYouTubeUpload(id);
     if (['submitting', 'queued', 'needs_reconciliation', 'delivered'].includes(job.status) || job.providerPostId) return reconcileYouTubeJob(id);
     if (state.paused) throw new Error('Publishing is paused. Resume it in the queue, then continue this publication.');
-    return uploadYouTubeJob(id, youtubeSettingsSchema.parse(settings));
+    return uploadYouTubeJob(id, approvedVideoUploadSettings(job, settings));
   }
   if (['queued', 'needs_reconciliation'].includes(job.status) && job.provider === 'postiz') return reconcileJob(id);
   if (job.provider === 'postiz') { if (state.paused) throw new Error('Publishing is paused. Resume the queue before continuing.'); await runDueJobs(); }
@@ -113,9 +115,23 @@ export async function publicationHandoff(id: string) {
   const operations = automaticEligible ? job.draftId ? await listOperations(job.draftId) : job.subject?.kind === 'video' ? await listVideoOperations(job.subject.id) : [] : [];
   const automatic = operations.some(operation => operation.kind === 'publish' && operation.input.jobId === job.id);
   const reason = account.status !== 'connected' ? '账号尚未完成自动发布连接，可在原生创作页面登录并发布。' : automatic ? '支持已授权的 API 发布；如当前任务受阻，可按下方步骤核对后继续。' : '此平台使用创作者原生发布流程；保留人工发布步骤以符合平台权限和自动化要求。';
-  const files = variant.mediaPaths.map(path => ({ name: basename(path), url: `/api/media?path=${encodeURIComponent(path)}` }));
+  let files: { name: string; url: string }[];
+  if (job.snapshot.video) {
+    const { projectId, renderId } = job.snapshot.video;
+    const { getIndependentVideoProject } = await import('./video.ts');
+    const project = await getIndependentVideoProject(projectId);
+    const render = project.renders.find(item => item.id === renderId);
+    files = [{ name: `${renderId}.mp4`, url: `/api/video-projects/${projectId}/renders/${renderId}/media?download=true` }];
+    if (render?.output?.captionsPath) files.push({ name: `${renderId}.srt`, url: `/api/video-projects/${projectId}/renders/${renderId}/captions` });
+  } else {
+    files = variant.mediaPaths.map((path, index) => {
+      if (!draft) throw new Error('An immutable article snapshot is required for media downloads.');
+      const reference = path.startsWith('studio-asset:') ? path : articleMediaReference(draft, variant.platform, index);
+      return { name: basename(path), url: `/api/media?path=${encodeURIComponent(reference)}` };
+    });
+  }
   const capability = publishingCapability(job.platform, job.subject?.kind === 'video' || variant.format === 'video' ? 'video' : 'article', account, { postizConfigured: Boolean(process.env.POSTIZ_API_KEY), expectedYoutubeChannel: expectedYouTubeChannelId });
-  return { requiresReconciliation, launch: variant.launch, articlePackageUrl: `/api/jobs/${job.id}/article.html`, capability, nativeUrl: capability.nativeUrl, title: variant.title, text: variant.text, tags: variant.tags, files, automatic, reason,
+  return { requiresReconciliation, launch: variant.launch, articlePackageUrl: draft ? `/api/jobs/${job.id}/article.html` : null, capability, nativeUrl: capability.nativeUrl, title: variant.title, text: variant.text, tags: variant.tags, files, automatic, reason,
     steps: [
       `在 Chrome 的 radarxai@gmail.com 配置文件中打开创作页面，确认目标账号为 ${account.label}。`,
       '点击复制标题和正文，将内容粘贴到对应编辑框；检查格式、来源、标签及平台要求的 AI 内容标识。',
